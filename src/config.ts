@@ -19,6 +19,16 @@ export async function loadConfig(path: string): Promise<RuntimeConfig> {
   const raw = Bun.TOML.parse(await Bun.file(absolute).text()) as Record<string, unknown>;
   const workspace = table(raw.workspace, "workspace");
   const openai = table(raw.openai, "openai");
+  // Existing installed configurations use this table for the Responses API.
+  const provider = openai.provider ?? "openai";
+  if (provider !== "openai" && provider !== "openrouter") throw new Error("openai.provider must be openai or openrouter");
+  let routing: RuntimeConfig["openai"]["routing"] = null;
+  if (provider === "openrouter") {
+    if (openai.zdr !== true || openai.allow_fallbacks !== false) throw new Error("OpenRouter generation requires zdr=true and allow_fallbacks=false");
+    const only = stringList(openai.only, "openai.only");
+    if (!only.length) throw new Error("openai.only must name at least one trusted generation provider");
+    routing = { only };
+  }
   const embeddings = table(raw.embeddings, "embeddings");
   const embeddingProvider = text(embeddings.provider ?? "openrouter", "embeddings.provider");
   if (embeddingProvider !== "openrouter" && embeddingProvider !== "local_pplx") throw new Error("embeddings.provider must be openrouter or local_pplx");
@@ -46,6 +56,7 @@ export async function loadConfig(path: string): Promise<RuntimeConfig> {
   const pricing = table(raw.pricing, "pricing");
   const serviceTier = text(openai.service_tier, "openai.service_tier");
   if (serviceTier !== "flex" && serviceTier !== "default") throw new Error("openai.service_tier must be flex or default");
+  if (provider === "openrouter" && serviceTier !== "default") throw new Error("OpenRouter generation requires service_tier=default; Flex is a direct OpenAI service tier");
   if (openai.store !== false) throw new Error("openai.store must be false");
   const retentionPolicy = text(openai.retention_policy, "openai.retention_policy");
   if (retentionPolicy !== "zero_data_retention" && retentionPolicy !== "modified_abuse_monitoring" && retentionPolicy !== "standard_store_false") {
@@ -57,6 +68,7 @@ export async function loadConfig(path: string): Promise<RuntimeConfig> {
   return {
     workspace: { db: resolve(absolute, "..", dbValue), defaultProfile },
     openai: {
+      provider, routing,
       baseUrl: text(openai.base_url, "openai.base_url").replace(/\/$/, ""),
       apiKeyEnv: text(openai.api_key_env, "openai.api_key_env"),
       model: text(openai.model, "openai.model"),
@@ -150,6 +162,6 @@ export function requireEmbeddingCredentials(config: RuntimeConfig): string | nul
 
 export function requireApprovedRetention(config: RuntimeConfig): void {
   if (!config.openai.retentionVerified) {
-    throw new Error("OpenAI retention is not operator-verified; set openai.retention_verified=true only after confirming the configured project policy");
+    throw new Error("Generation retention is not operator-verified; set openai.retention_verified=true only after confirming the configured provider policy");
   }
 }

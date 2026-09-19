@@ -5,7 +5,9 @@
 db = "/absolute/path/to/runtime/memory.sqlite"
 default_profile = "owner"
 
+# Generation uses the OpenAI-compatible Responses API for either provider.
 [openai]
+provider = "openai"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 model = "gpt-5.6-luna"
@@ -13,11 +15,20 @@ service_tier = "flex"
 store = false
 timeout_ms = 900000
 
-# Set this only after an operator verifies the direct OpenAI organization or
-# project policy. `standard_store_false` requires explicit data-owner approval.
+# Set this only after an operator verifies the configured provider's retention
+# policy. `standard_store_false` requires explicit data-owner approval.
 # store=false is not proof of ZDR.
 retention_policy = "zero_data_retention"
 retention_verified = false
+
+# OpenRouter generation: change provider to "openrouter", base_url to
+# "https://openrouter.ai/api/v1", api_key_env to "OPENROUTER_API_KEY",
+# model to e.g. "openai/gpt-5.6-luna", and service_tier to "default".
+# These routing settings apply only to OpenRouter generation. Choose trusted
+# hosts for your selected model and update [pricing] for its actual rates.
+zdr = true
+allow_fallbacks = false
+only = ["OpenAI"]
 
 [embeddings]
 base_url = "https://openrouter.ai/api/v1"

@@ -39,7 +39,9 @@ export class OpenAIClient {
       ].join("\n\n");
       const response = responseSchema.parse(await this.request("/responses", {
         model: this.config.openai.model,
-        service_tier: this.config.openai.serviceTier,
+        ...(this.config.openai.provider === "openai"
+          ? { service_tier: this.config.openai.serviceTier }
+          : { provider: { zdr: true, allow_fallbacks: false, require_parameters: true, only: this.config.openai.routing!.only } }),
         store: false,
         input: [
           { role: "system", content: [{ type: "input_text", text: options.system }] },
@@ -83,9 +85,10 @@ export class OpenAIClient {
       },
     });
     return {
+      provider: this.config.openai.provider,
       configured_model: this.config.openai.model,
       returned_model: result.model,
-      requested_service_tier: this.config.openai.serviceTier,
+      requested_service_tier: this.config.openai.provider === "openai" ? this.config.openai.serviceTier : null,
       returned_service_tier: result.serviceTier,
       strict_structured_output: true,
       store: false,
@@ -107,7 +110,7 @@ export class OpenAIClient {
       if (!response.ok) {
         const error = apiErrorSchema.safeParse(payload);
         const message = error.success ? error.data.error.message : response.statusText;
-        throw new Error(`OpenAI ${path} failed (${response.status}${requestId ? `, ${requestId}` : ""}): ${message}`);
+        throw new Error(`${this.config.openai.provider} ${path} failed (${response.status}${requestId ? `, ${requestId}` : ""}): ${message}`);
       }
       return payload;
     } finally {

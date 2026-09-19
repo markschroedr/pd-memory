@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   if (command === "doctor") {
     const local = {
       db: config.workspace.db,
+      provider: config.openai.provider,
       base_url: config.openai.baseUrl,
       credential_env: config.openai.apiKeyEnv,
       credential_set: Boolean(process.env[config.openai.apiKeyEnv]),

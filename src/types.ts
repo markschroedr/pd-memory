@@ -12,6 +12,8 @@ export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
 export interface RuntimeConfig {
   workspace: { db: string; defaultProfile: string };
   openai: {
+    provider: "openai" | "openrouter";
+    routing: { only: string[] } | null;
     baseUrl: string;
     apiKeyEnv: string;
     model: string;
