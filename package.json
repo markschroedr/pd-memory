@@ -1,0 +1,21 @@
+{
+  "name": "pd-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pd-memory": "src/cli.ts"
+  },
+  "scripts": {
+    "check": "bunx tsc --noEmit",
+    "start": "bun src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  },
+  "dependencies": {
+    "expr-eval": "^2.0.2",
+    "zod": "^4.6.5"
+  }
+}

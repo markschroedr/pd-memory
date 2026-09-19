@@ -1,0 +1,100 @@
+# Current runtime configuration. Copy outside Git and set PD_MEMORY_CONFIG to it.
+# Runtime databases and model outputs must also stay outside this repository.
+
+[workspace]
+db = "/absolute/path/to/runtime/memory.sqlite"
+default_profile = "owner"
+
+[openai]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-5.6-luna"
+service_tier = "flex"
+store = false
+timeout_ms = 900000
+
+# Set this only after an operator verifies the direct OpenAI organization or
+# project policy. `standard_store_false` requires explicit data-owner approval.
+# store=false is not proof of ZDR.
+retention_policy = "zero_data_retention"
+retention_verified = false
+
+[embeddings]
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model = "perplexity/pplx-embed-v1-0.6b"
+dimension = 1024
+timeout_ms = 120000
+zdr = true
+allow_fallbacks = false
+only = ["Perplexity"]
+
+[identity]
+# Claimant names with explicit workspace roles. Source kind does not set authority.
+user_names = []
+third_party_names = []
+
+[ingest]
+# Top related observations per candidate; shared content is sent once.
+# Similarity supplies context, not an identity or duplication decision.
+matches_per_candidate = 5
+
+[chunk]
+target_tokens = 400
+single_chunk_tokens = 600
+extract_window_tokens = 150000
+
+[search]
+default_limit = 10
+max_limit = 40
+rrf_k = 60
+
+[brief]
+spine_share = 0.3
+per_page_cap = 6
+next_cap = 8
+# Maximum recent-history section inside a standing brief. The total brief budget still wins.
+recent_budget = 1200
+
+[buckets]
+bucket_3_min = 0.6
+bucket_2_min = 0.3
+
+[formulas]
+standing = "weight * (0.4 + 0.6 * confidence) * freshness * source_prior * (1 + 0.15 * log(1 + sources))"
+situational = "relevance * (0.5 + 0.5 * confidence) * (0.7 + 0.3 * freshness) * source_prior"
+chunk = "relevance * (0.5 + 0.5 * weight) * source_prior"
+page = "weight * (0.5 + 0.5 * freshness) * (1 + 0.1 * log(1 + observations) + 0.05 * log(1 + inbound))"
+
+[call_sites]
+search = "situational"
+search_chunk = "chunk"
+brief_standing = "standing"
+brief_situational = "situational"
+page_rank = "page"
+
+[source_priors]
+note_user = 1.0
+note_agent = 0.8
+meeting = 0.7
+conversation = 0.6
+document = 0.5
+chat_log = 0.4
+coding_session = 0.3
+
+[profiles.owner]
+root = "root"
+sensitivity_max = 1.0
+budget = 16000
+
+[profiles.coding]
+root = "root"
+sensitivity_max = 0.3
+budget = 6000
+
+[pricing]
+# USD per million tokens. Keep these aligned with the configured model and tier.
+input_per_million = 0.10
+cached_input_per_million = 0.01
+output_per_million = 0.60
+embedding_per_million = 0.004
