@@ -246,7 +246,10 @@ function assembledRecent(store: MemoryStore, seq: number, budget: number, profil
         id = `${value.id} → ${value.replaced_by}`;
       }
       const page = current.pages.find((slug: string) => allowedPages.has(slug));
-      if (page) candidates.push({ id, line: current.line, page });
+      if (page) {
+        const date = briefDate(current.happened);
+        candidates.push({ id, line: current.line + (date ? ` (${date})` : ""), page });
+      }
     } catch { /* Hidden or unavailable entries are absent from this profile. */ }
   }
 
@@ -282,8 +285,10 @@ function changedBrief(store: MemoryStore, config: RuntimeConfig, since: number, 
     let rendered: string | null = null;
     try {
       const value = store.open(change.entry, { sensitivityMax: profile.sensitivityMax });
-      if (value.kind === "observation") rendered = `\n- ${value.id}${value.replaced_by ? ` → ${value.replaced_by}` : ""} ${value.line}`;
-      else if (value.kind === "page") rendered = `\n- ${value.id}${value.replaced_by ? ` → ${value.replaced_by}` : ""}${value.line ? ` — ${value.line}` : ""}`;
+      if (value.kind === "observation") {
+        const date = briefDate(value.happened);
+        rendered = `\n- ${value.id}${value.replaced_by ? ` → ${value.replaced_by}` : ""} ${value.line}${date ? ` (${date})` : ""}`;
+      } else if (value.kind === "page") rendered = `\n- ${value.id}${value.replaced_by ? ` → ${value.replaced_by}` : ""}${value.line ? ` — ${value.line}` : ""}`;
     } catch { /* Hidden or deleted entries are absent from this profile. */ }
     if (!rendered) { shown++; continue; }
     if (!builder.add(rendered)) break;
@@ -298,7 +303,14 @@ function changedBrief(store: MemoryStore, config: RuntimeConfig, since: number, 
 
 function renderObservation(row: BriefObservation, config: RuntimeConfig): string {
   const marker = row.body ? "+" : "";
-  return `\n- ${row.id} [${bucket(row.rank, config)}${marker}] ${row.line} (${row.sources.length})`;
+  const date = briefDate(row.happened);
+  return `\n- ${row.id} [${bucket(row.rank, config)}${marker}] ${row.line} (${row.sources.length}${date ? `; ${date}` : ""})`;
+}
+function briefDate(happened: string | null): string {
+  if (!happened) return "";
+  const [year, month, day] = happened.slice(0, 10).split("-").map(Number);
+  const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1];
+  return `${day} ${monthName}${year === new Date().getUTCFullYear() ? "" : ` ${year}`}`;
 }
 function observationVariables(row: RetrievalObservation, config: RuntimeConfig, relevance = 0): Record<string, number> {
   const freshness = freshnessFor(row.happened ?? row.entered, row.durability);
