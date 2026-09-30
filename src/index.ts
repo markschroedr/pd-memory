@@ -6,6 +6,7 @@ export { EmbeddingClient, rebuildObservationEmbeddings } from "./embeddings";
 export { drain, extractQueued, parseSpeakerLabels, processNext, submitManifest, submitSource, validateExtraction, validateIntegration } from "./ingestion";
 export { MemoryMutations, type EditInput, type NoteInput } from "./mutations";
 export { OpenAIClient } from "./openai";
+export { composeMemory } from "./compose";
 export { briefMemory, searchMemory } from "./retrieval";
 export { MemoryStore } from "./store";
 export { PdMemoryRuntime } from "./runtime";

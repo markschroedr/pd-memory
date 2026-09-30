@@ -2,7 +2,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
-import { PdMemoryRuntime, drain } from "../src/index";
+import { PdMemoryRuntime, drain, runCommand, EmbeddingClient } from "../src/index";
 import { loadConfig } from "../src/config";
 import { prepareDialogue } from "../src/dialogue";
 import { completedMessages, parseSession, type Provider } from "./session-formats";
@@ -65,6 +65,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const stats = { files: files.size, submitted: 0, reused: 0, skipped: 0, messages: 0, characters: 0, userCharacters: 0, assistantCharacters: 0 };
   const jobs = new Set<number>();
   let processed = 0;
+  let maintenance: Awaited<ReturnType<typeof runCommand<"maintain">>> | null = null;
   try {
     for (const [path, provider] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
       const session = parseSession(path, provider);
@@ -100,14 +101,20 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     if (values.wait && memory && jobs.size) {
       memory.store.recoverInterrupted(new Date(Date.now() - 30 * 60_000).toISOString());
-      memory.store.retryRecoverableFailures();
+      // Retry all previously failed jobs once per daily invocation, including exhausted attempts.
+      // A transient outage must not permanently strand their already captured message IDs.
+      memory.store.retryFailed();
       // Include earlier queue-only imports of these sessions, not just newly submitted jobs.
       processed = (await drain(memory.store, memory.config, [...jobs], concurrency)).length;
       const incomplete = [...jobs].map(id => memory.store.getJob(id)).filter(job => job?.status !== "completed");
       if (incomplete.length) throw new Error(`Session ingestion incomplete: ${incomplete.map(job => `${job?.id}:${job?.status}`).join(", ")}`);
     }
+    if (values.wait && memory) {
+      maintenance = await runCommand({ store: memory.store, config: memory.config, embeddings: new EmbeddingClient(memory.config) }, "maintain", {});
+      if (maintenance.timeline.failed.length || maintenance.compositions.failed.length) process.exitCode = 1;
+    }
   } finally { memory?.close(); }
-  console.log(JSON.stringify({ ...stats, dry_run: Boolean(values["dry-run"]), jobs: [...jobs], processed }, null, 2));
+  console.log(JSON.stringify({ ...stats, dry_run: Boolean(values["dry-run"]), jobs: [...jobs], processed, maintenance }, null, 2));
 }
 
 function isMainSession(path: string, provider: Provider): boolean {

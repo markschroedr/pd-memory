@@ -44,7 +44,7 @@ export default function pdMemory(pi: PiApi): void {
     const session = context.sessionManager.getSessionId();
     if (briefedSession === session) return;
     try {
-      const result = await invoke(settings, environment, ["brief", "--profile", settings.profile ?? "coding", "--json"]);
+      const result = await invoke(settings, environment, ["brief", "--profile", settings.profile ?? "coding", "--folder", canonical(context.sessionManager.getCwd()), "--json"]);
       if (!result?.text?.trim()) return;
       briefedSession = session;
       return { message: { customType: "pd-memory-brief", content: `Standing memory brief\n\n${result.text}`, display: false } };
@@ -71,15 +71,15 @@ export default function pdMemory(pi: PiApi): void {
 function registerTools(pi: PiApi, settings: PiMemoryConfig, environment: NodeJS.ProcessEnv): void {
   const catalog = invokeSync(settings, environment, ["catalog"]) as { commands: CommandDefinition[] };
   for (const definition of catalog.commands) {
-    if (!["search", "brief", "open", "note"].includes(definition.name)) continue;
+    if (!["search", "brief", "open", "note", "focus", "forget"].includes(definition.name)) continue;
     pi.registerTool({
       name: `memory_${definition.name}`,
       label: `Memory ${definition.name[0]!.toUpperCase()}${definition.name.slice(1)}`,
       description: definition.description,
       promptSnippet: definition.description,
-      parameters: definition.inputSchema,
-      async execute(_id: string, params: any, signal: AbortSignal) {
-        const result = await invokeCommand(settings, environment, definition.name, params, signal);
+      parameters: ["brief", "focus"].includes(definition.name) ? withoutFolder(definition.inputSchema) : definition.inputSchema,
+      async execute(_id: string, params: any, signal: AbortSignal, _onUpdate: unknown, context: PiContext) {
+        const result = await invokeCommand(settings, environment, definition.name, params, signal, context);
         const text = definition.name === "brief" ? result.text : definition.name === "search" ? formatSearch(result) : JSON.stringify(result, null, 2);
         return { content: [{ type: "text", text }], details: result };
       },
@@ -87,13 +87,17 @@ function registerTools(pi: PiApi, settings: PiMemoryConfig, environment: NodeJS.
   }
 }
 
-async function invokeCommand(settings: PiMemoryConfig, environment: NodeJS.ProcessEnv, name: string, params: any, signal: AbortSignal): Promise<any> {
+async function invokeCommand(settings: PiMemoryConfig, environment: NodeJS.ProcessEnv, name: string, params: any, signal: AbortSignal, context: PiContext): Promise<any> {
   if (name === "search") return invoke(settings, environment, ["search", ...repeat("--query", params.queries), ...repeat("--page", params.pages),
     ...(params.layer ? ["--layer", params.layer] : []), ...(params.limit ? ["--limit", String(params.limit)] : []),
     ...(params.profile ? ["--profile", params.profile] : []), "--json"], undefined, signal);
-  if (name === "brief") return invoke(settings, environment, ["brief", ...(params.page ? ["--page", params.page] : []),
+  if (name === "brief") return invoke(settings, environment, ["brief", ...(params.page ? ["--page", params.page] : ["--folder", canonical(context.sessionManager.getCwd())]),
     ...(params.for ? ["--for", params.for] : []), ...repeat("--query", params.queries), ...(params.budget ? ["--budget", String(params.budget)] : []),
-    ...(params.since !== undefined ? ["--since", String(params.since)] : []), ...(params.profile ? ["--profile", params.profile] : []), "--json"], undefined, signal);
+    ...(params.since !== undefined ? ["--since", String(params.since)] : []), ...(params.compose ? ["--compose"] : []), ...(params.profile ? ["--profile", params.profile] : []), "--json"], undefined, signal);
+  if (name === "focus") return invoke(settings, environment, ["focus", params.action, params.id, "--folder", canonical(context.sessionManager.getCwd()),
+    ...(params.profile ? ["--profile", params.profile] : [])], undefined, signal);
+  if (name === "forget") return invoke(settings, environment, ["forget", params.id, "--reason", params.reason, "--actor", params.actor,
+    ...(params.profile ? ["--profile", params.profile] : [])], undefined, signal);
   if (name === "open") return invoke(settings, environment, ["open", params.id, ...(params.history ? ["--history"] : []),
     ...(params.full ? ["--full"] : []), ...(params.profile ? ["--profile", params.profile] : [])], undefined, signal);
   if (name === "note") return invoke(settings, environment, ["note", "--line", params.line, ...repeat("--page", params.pages), "--actor", params.actor,
@@ -207,6 +211,11 @@ function routeFor(settings: PiMemoryConfig, cwd: string): ProjectRoute {
   const leaf = current.split("/").filter(Boolean).at(-1) ?? "root";
   const home = leaf.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return { root: current, home: /^[a-z][a-z0-9-]{1,63}$/.test(home) ? home : "root" };
+}
+function withoutFolder(schema: Record<string, unknown>): Record<string, unknown> {
+  const properties = { ...(schema.properties as Record<string, unknown>) };
+  delete properties.folder;
+  return { ...schema, properties, required: (schema.required as string[] | undefined)?.filter((key) => key !== "folder") };
 }
 function numberArgs(params: any): string[] {
   return ["confidence", "weight", "durability", "sensitivity"].flatMap((name) => params[name] === undefined || params[name] === null ? [] : [`--${name}`, String(params[name])]);

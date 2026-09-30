@@ -29,7 +29,7 @@ export interface PageRow {
   provisional: number; created_at: string; updated_at: string;
 }
 export interface ObservationRow extends ObservationValue {
-  id: string; entered: string; replaced_by: string | null;
+  id: string; entered: string; replaced_by: string | null; forgotten_at: string | null;
 }
 interface ChunkRow {
   id: string; source_id: number; chunk_index: number; start_line: number; end_line: number; context: string;
@@ -37,7 +37,7 @@ interface ChunkRow {
 interface EmbeddingRow { entry_id: string; vector: Uint8Array }
 export interface ChangeRow {
   seq: number; at: string; by_actor: string; op: string; entry: string | null;
-  before_json: string | null; reason: string | null;
+  before_json: string | null; reason: string | null; source_id: number | null;
 }
 export interface RetrievalObservation extends ObservationRow {
   pages: string[]; sources: Array<{ id: string; kind: SourceKind }>;
@@ -96,7 +96,7 @@ export class MemoryStore {
         id TEXT PRIMARY KEY, line TEXT NOT NULL, body TEXT, happened TEXT, entered TEXT NOT NULL,
         claimant TEXT, authority TEXT NOT NULL, kind TEXT NOT NULL, confidence REAL NOT NULL,
         weight REAL NOT NULL, durability REAL, sensitivity REAL NOT NULL,
-        replaced_by TEXT REFERENCES observations(id)
+        replaced_by TEXT REFERENCES observations(id), forgotten_at TEXT
       );
       CREATE TABLE IF NOT EXISTS observation_pages (
         observation_id TEXT NOT NULL REFERENCES observations(id), page_slug TEXT NOT NULL REFERENCES pages(slug),
@@ -123,10 +123,25 @@ export class MemoryStore {
         seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, by_actor TEXT NOT NULL,
         op TEXT NOT NULL, entry TEXT, before_json TEXT, reason TEXT
       );
+      CREATE TABLE IF NOT EXISTS timeline_nodes (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('day','week','month','year')),
+        starts TEXT NOT NULL, ends TEXT NOT NULL, text TEXT NOT NULL, headline TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS composed_briefs (
+        scope TEXT PRIMARY KEY, text TEXT NOT NULL, input_ids TEXT NOT NULL,
+        seq INTEGER NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS folder_brief_requests (
+        folder TEXT PRIMARY KEY, last_requested_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS model_calls (
         id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id), phase TEXT NOT NULL,
         request_id TEXT, model TEXT NOT NULL, service_tier TEXT, usage_json TEXT NOT NULL,
         cost_usd REAL NOT NULL, repaired INTEGER NOT NULL, error TEXT, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS brief_exclusions (
+        folder TEXT NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(folder,entry)
       );
       CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status,id);
       CREATE INDEX IF NOT EXISTS idx_observation_pages_page ON observation_pages(page_slug);
@@ -155,6 +170,9 @@ export class MemoryStore {
     if (!jobColumns.has("extraction_finished_at")) this.db.exec("ALTER TABLE jobs ADD COLUMN extraction_finished_at TEXT");
     if (!jobColumns.has("extraction_attempts")) this.db.exec("ALTER TABLE jobs ADD COLUMN extraction_attempts INTEGER NOT NULL DEFAULT 0");
     if (!jobColumns.has("integration_attempts")) this.db.exec("ALTER TABLE jobs ADD COLUMN integration_attempts INTEGER NOT NULL DEFAULT 0");
+    if (!(this.db.query("PRAGMA table_info(changes)").all() as Array<{ name: string }>).some((row) => row.name === "source_id")) this.db.exec("ALTER TABLE changes ADD COLUMN source_id INTEGER REFERENCES sources(id)");
+    const observationColumns = new Set((this.db.query("PRAGMA table_info(observations)").all() as Array<{ name: string }>).map((row) => row.name));
+    if (!observationColumns.has("forgotten_at")) this.db.exec("ALTER TABLE observations ADD COLUMN forgotten_at TEXT");
     const pageColumns = new Set((this.db.query("PRAGMA table_info(pages)").all() as Array<{ name: string }>).map((row) => row.name));
     if (!pageColumns.has("parent")) this.db.exec("ALTER TABLE pages ADD COLUMN parent TEXT REFERENCES pages(slug)");
     if (!pageColumns.has("replaced_by")) this.db.exec("ALTER TABLE pages ADD COLUMN replaced_by TEXT REFERENCES pages(slug)");
@@ -195,8 +213,8 @@ export class MemoryStore {
       const sourceId = Number(inserted.lastInsertRowid);
       const job = this.db.query("INSERT INTO jobs(source_id,status,created_at) VALUES (?,'queued',?)")
         .run(sourceId, now);
-      this.db.query("INSERT INTO changes(at,by_actor,op,entry,reason) VALUES (?,'ingest','ingest',?,?)")
-        .run(now, `src:${sourceId}`, "Source submitted");
+      this.db.query("INSERT INTO changes(at,by_actor,op,entry,reason,source_id) VALUES (?,'ingest','ingest',?,?,?)")
+        .run(now, `src:${sourceId}`, "Source submitted", sourceId);
       return { sourceId, jobId: Number(job.lastInsertRowid) };
     })();
     return { source: `src:${tx.sourceId}`, job: tx.jobId, reused: false, status: "queued" };
@@ -276,9 +294,11 @@ export class MemoryStore {
     const input = Number(result.usage.input_tokens ?? 0);
     const output = Number(result.usage.output_tokens ?? 0);
     const cached = Number(result.usage.input_tokens_details?.cached_tokens ?? 0);
+    const tierFactor = config.openai.serviceTier === "flex" && result.serviceTier === "default" ? 2
+      : config.openai.serviceTier === "default" && result.serviceTier === "flex" ? 0.5 : 1;
     const cost = phase.startsWith("embed")
       ? input * config.pricing.embeddingPerMillion / 1_000_000
-      : ((input - cached) * config.pricing.inputPerMillion + cached * config.pricing.cachedInputPerMillion +
+      : tierFactor * ((input - cached) * config.pricing.inputPerMillion + cached * config.pricing.cachedInputPerMillion +
         output * config.pricing.outputPerMillion) / 1_000_000;
     this.db.query(`INSERT INTO model_calls
       (job_id,phase,request_id,model,service_tier,usage_json,cost_usd,repaired,error,created_at)
@@ -292,6 +312,21 @@ export class MemoryStore {
       ? this.db.query("SELECT id FROM model_calls WHERE job_id=? AND request_id=? ORDER BY id DESC LIMIT 1").get(jobId, requestId) as { id: number } | null
       : this.db.query("SELECT id FROM model_calls WHERE job_id=? ORDER BY id DESC LIMIT 1").get(jobId) as { id: number } | null;
     if (row) this.db.query("UPDATE model_calls SET error=? WHERE id=?").run(message.slice(0, 4000), row.id);
+  }
+
+  briefExclusions(folder: string): Set<string> {
+    return new Set((this.db.query("SELECT entry FROM brief_exclusions WHERE folder=?").all(folder) as Array<{ entry: string }>).map((row) => row.entry));
+  }
+
+  setBriefExclusion(folder: string, entry: string, hidden: boolean): void {
+    this.db.transaction(() => {
+      const result = hidden
+        ? this.db.query("INSERT OR IGNORE INTO brief_exclusions(folder,entry) VALUES (?,?)").run(folder, entry)
+        : this.db.query("DELETE FROM brief_exclusions WHERE folder=? AND entry=?").run(folder, entry);
+      if (!result.changes) return;
+      this.db.query("INSERT INTO changes(at,by_actor,op,entry,reason) VALUES (?,'agent',?,?,?)")
+        .run(new Date().toISOString(), hidden ? "brief_hide" : "brief_show", entry, folder);
+    })();
   }
 
   allPages(): ExistingPageContext[] {
@@ -432,13 +467,13 @@ export class MemoryStore {
       coalesce(max(o.confidence),0.5) AS confidence,count(DISTINCT o.id) AS sources
       FROM chunks c JOIN sources s ON s.id=c.source_id
       LEFT JOIN observation_evidence oe ON oe.chunk_id=c.id
-      LEFT JOIN observations o ON o.id=oe.observation_id AND o.replaced_by IS NULL AND o.sensitivity<=?
+      LEFT JOIN observations o ON o.id=oe.observation_id AND o.replaced_by IS NULL AND o.forgotten_at IS NULL AND o.sensitivity<=?
       WHERE c.id IN (SELECT value FROM json_each(?)) AND s.sensitivity<=?${pageClause.sql}
       GROUP BY c.id`).all(sensitivityMax, JSON.stringify(ids), sensitivityMax, ...pageClause.values);
   }
 
   observationEmbeddingInputs(): Array<{ id: string; text: string }> {
-    return this.db.query<Pick<ObservationRow, "id" | "line" | "body">, []>("SELECT id,line,body FROM observations WHERE replaced_by IS NULL ORDER BY id").all()
+    return this.db.query<Pick<ObservationRow, "id" | "line" | "body">, []>("SELECT id,line,body FROM observations WHERE replaced_by IS NULL AND forgotten_at IS NULL ORDER BY id").all()
       .map((row) => ({ id: row.id, text: observationEmbeddingText(row) }));
   }
 
@@ -451,7 +486,7 @@ export class MemoryStore {
 
   nearestObservationEmbeddings(queries: number[][], model: string, sensitivityMax = 1) {
     const rows = this.db.query<EmbeddingRow, [string, number]>(`SELECT e.entry_id,e.vector FROM embeddings e
-      JOIN observations o ON o.id=e.entry_id WHERE e.model=? AND o.replaced_by IS NULL AND o.sensitivity<=?`)
+      JOIN observations o ON o.id=e.entry_id WHERE e.model=? AND o.replaced_by IS NULL AND o.forgotten_at IS NULL AND o.sensitivity<=?`)
       .iterate(model, sensitivityMax);
     return nearestVectors(embeddingRows(rows), queries, 100);
   }
@@ -459,17 +494,18 @@ export class MemoryStore {
   observationIdsForPages(slugs: string[]): string[] {
     const ids = new Set<string>();
     const query = this.db.query(`SELECT o.id FROM observations o JOIN observation_pages p ON p.observation_id=o.id
-      WHERE p.page_slug=? AND o.replaced_by IS NULL ORDER BY o.entered DESC`);
+      WHERE p.page_slug=? AND o.replaced_by IS NULL AND o.forgotten_at IS NULL ORDER BY o.entered DESC`);
     for (const slug of slugs) for (const row of query.all(slug) as Array<{ id: string }>) ids.add(row.id);
     return [...ids];
   }
 
-  lexicalObservationIds(query: string, sensitivityMax = 1): string[] {
+  lexicalObservationIds(query: string, sensitivityMax = 1, mode: "any" | "phrase" = "any"): string[] {
     const terms = query.normalize("NFKC").match(/[\p{L}\p{N}]+/gu) ?? [];
     if (!terms.length) return [];
-    const match = [...new Set(terms.map((term) => `"${term.replaceAll('"', '""')}"`))].join(" OR ");
+    const match = mode === "phrase" ? `"${terms.join(" ")}"`
+      : [...new Set(terms.map((term) => `"${term.replaceAll('"', '""')}"`))].join(" OR ");
     return (this.db.query(`SELECT f.id FROM observations_fts f JOIN observations o ON o.id=f.id
-      WHERE observations_fts MATCH ? AND o.replaced_by IS NULL AND o.sensitivity<=? ORDER BY bm25(observations_fts) LIMIT 100`).all(match, sensitivityMax) as Array<{ id: string }>)
+      WHERE observations_fts MATCH ? AND o.replaced_by IS NULL AND o.forgotten_at IS NULL AND o.sensitivity<=? ORDER BY bm25(observations_fts) LIMIT 100`).all(match, sensitivityMax) as Array<{ id: string }>)
       .map((row) => row.id);
   }
 
@@ -477,7 +513,7 @@ export class MemoryStore {
     if (ids?.length === 0) return [];
     const selection = ids === undefined ? "" : " AND id IN (SELECT value FROM json_each(?))";
     const rows = this.db.query<ObservationRow, Array<string | number>>(`SELECT * FROM observations
-      WHERE replaced_by IS NULL AND sensitivity<=?${selection} ORDER BY entered,id`)
+      WHERE replaced_by IS NULL AND forgotten_at IS NULL AND sensitivity<=?${selection} ORDER BY entered,id`)
       .all(sensitivityMax, ...(ids === undefined ? [] : [JSON.stringify(ids)]));
     if (!rows.length) return [];
     const selected = JSON.stringify(rows.map((row) => row.id));
@@ -570,7 +606,7 @@ export class MemoryStore {
         subpages: this.readablePages(sensitivityMax)
           .filter((child) => child.parent === id && this.pageHasVisibleKnowledge(child.slug, sensitivityMax))
           .map((child) => ({ slug: child.slug, line: child.line })),
-        observations: (this.db.query(`SELECT o.id,o.line,o.body IS NOT NULL AS has_body,o.kind,o.happened,o.replaced_by
+        observations: (this.db.query(`SELECT o.id,o.line,o.body IS NOT NULL AS has_body,o.kind,o.happened,o.replaced_by,o.forgotten_at
           FROM observations o JOIN observation_pages p ON p.observation_id=o.id
           WHERE p.page_slug=? AND o.sensitivity<=? ORDER BY o.entered,o.id`).all(id, sensitivityMax)),
         ...(options.history ? { history: historyRows } : {}) };
@@ -628,7 +664,7 @@ function chunkPageClause(pages: string[] | undefined, sensitivityMax: number): {
   const placeholders = pages.map(() => "?").join(",");
   return { sql: ` AND EXISTS (SELECT 1 FROM observation_evidence oe
     JOIN observations o ON o.id=oe.observation_id JOIN observation_pages op ON op.observation_id=o.id
-    WHERE oe.chunk_id=c.id AND o.replaced_by IS NULL AND o.sensitivity<=? AND op.page_slug IN (${placeholders}))`,
+    WHERE oe.chunk_id=c.id AND o.replaced_by IS NULL AND o.forgotten_at IS NULL AND o.sensitivity<=? AND op.page_slug IN (${placeholders}))`,
     values: [sensitivityMax, ...pages] };
 }
 function splitSourceLines(text: string): string[] { return text.split("\n"); }

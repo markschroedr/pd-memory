@@ -21,7 +21,11 @@ Usage:
   pd-memory jobs [--retry [JOB_ID]]
   pd-memory captured-session-entries --session KEY
   pd-memory search --query TEXT [--query TEXT ...] [--page SLUG ...] [--layer observations|chunks|both] [--limit N] [--profile NAME] [--json]
-  pd-memory brief [--page SLUG] [--for SITUATION] [--query FACET ...] [--budget UNITS] [--since SEQ] [--profile NAME] [--json]
+  pd-memory brief [--folder PATH] [--page SLUG] [--for SITUATION] [--query FACET ...] [--budget UNITS] [--since SEQ] [--profile NAME] [--compose] [--json]
+  pd-memory focus hide|show PAGE_OR_OBSERVATION --folder PATH
+  pd-memory maintain
+  pd-memory timeline consolidate
+  pd-memory forget OBSERVATION_OR_NODE --reason TEXT --actor user|agent [--profile NAME]
   pd-memory open ID [--history] [--full] [--profile NAME]
   pd-memory note --line TEXT --page SLUG [--page SLUG ...] --actor user|agent [--body TEXT] [score options] [--profile NAME]
   pd-memory edit ID --reason TEXT --actor user|agent [observation fields] [--supersede] [--profile NAME]
@@ -134,6 +138,21 @@ async function main(): Promise<void> {
       assertEmpty(args); print({ session, entry_ids: [...store.capturedSessionEntryIds(session)] }); return;
     }
     const context = { store, config, embeddings: new EmbeddingClient(config) };
+    if (command === "maintain") {
+      assertEmpty(args);
+      const result = await runCommand(context, "maintain", {});
+      print(result);
+      if (result.timeline.failed.length || result.compositions.failed.length) process.exitCode = 1;
+      return;
+    }
+    if (command === "timeline") {
+      const action = required(args.shift(), "action");
+      assertEmpty(args);
+      const result = await runCommand(context, "timeline", { action });
+      print(result);
+      if (result.failed.length) process.exitCode = 1;
+      return;
+    }
     if (command === "search") {
       const json = has(args, "--json");
       const input = { queries: takeAll(args, "--query"), pages: optionalArray(takeAll(args, "--page")),
@@ -143,11 +162,21 @@ async function main(): Promise<void> {
     }
     if (command === "brief") {
       const json = has(args, "--json");
-      const input = { page: take(args, "--page"), for: take(args, "--for"), queries: optionalArray(takeAll(args, "--query")),
+      const input = { page: take(args, "--page"), folder: take(args, "--folder"), for: take(args, "--for"), queries: optionalArray(takeAll(args, "--query")),
         budget: optionalInteger(take(args, "--budget"), "--budget"),
-        since: optionalInteger(take(args, "--since"), "--since"), profile: take(args, "--profile") };
+        since: optionalInteger(take(args, "--since"), "--since"), profile: take(args, "--profile"), compose: has(args, "--compose") };
       assertEmpty(args); const result = await runCommand(context, "brief", compact(input));
       if (json) print(result); else console.log(result.text); return;
+    }
+    if (command === "focus") {
+      const input = { action: required(args.shift(), "action"), id: required(args.shift(), "ID"),
+        folder: required(take(args, "--folder"), "--folder"), profile: take(args, "--profile") };
+      assertEmpty(args); print(await runCommand(context, "focus", compact(input))); return;
+    }
+    if (command === "forget") {
+      const input = { id: required(args.shift(), "ID"), reason: required(take(args, "--reason"), "--reason"),
+        actor: required(take(args, "--actor"), "--actor"), profile: take(args, "--profile") };
+      assertEmpty(args); print(await runCommand(context, "forget", compact(input))); return;
     }
     if (command === "open") {
       const input = { id: required(args.shift(), "ID"), history: has(args, "--history"), full: has(args, "--full"), profile: take(args, "--profile") };

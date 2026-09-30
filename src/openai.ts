@@ -13,10 +13,55 @@ const responseSchema = z.object({
     type: z.string(), text: z.string().optional(), refusal: z.string().optional(),
   })).optional() })),
 });
-const apiErrorSchema = z.object({ error: z.object({ message: z.string() }) });
+const apiErrorSchema = z.object({ error: z.object({ message: z.string(), code: z.string().nullable().optional() }) });
 
 export class OpenAIClient {
   constructor(readonly config: RuntimeConfig) {}
+
+  async generate(options: {
+    system: string;
+    input: string;
+    sensitive?: boolean;
+    repaired?: boolean;
+    validate?: (value: string) => void;
+    onAttempt?: (result: ModelResult<string>, valid: boolean, error?: Error) => void;
+  }): Promise<ModelResult<string>> {
+    if (options.sensitive !== false) requireApprovedRetention(this.config);
+    // Missing credentials are a preflight failure, not an attempted model call.
+    requireCredentials(this.config);
+    const result: ModelResult<string> = {
+      value: "", raw: "", repaired: options.repaired === true, requestId: null,
+      model: this.config.openai.model, serviceTier: null, usage: {},
+    };
+    let error: Error | undefined;
+    try {
+      const request = await this.request("/responses", {
+        model: this.config.openai.model,
+        ...(this.config.openai.provider === "openai"
+          ? { service_tier: this.config.openai.serviceTier }
+          : { provider: { zdr: true, allow_fallbacks: false, require_parameters: true, only: this.config.openai.routing!.only } }),
+        reasoning: { effort: "medium" },
+        store: false,
+        input: [
+          { role: "system", content: [{ type: "input_text", text: options.system }] },
+          { role: "user", content: [{ type: "input_text", text: options.input }] },
+        ],
+      });
+      const response = responseSchema.parse(request.payload);
+      result.requestId = stringOrNull(response.id);
+      result.model = response.model ?? this.config.openai.model;
+      result.serviceTier = stringOrNull(response.service_tier) ?? request.requestedTier;
+      result.usage = response.usage ?? {};
+      result.value = result.raw = outputText(response);
+      options.validate?.(result.value);
+    } catch (cause) {
+      error = cause instanceof Error ? cause : new Error(String(cause));
+    }
+    // Recording failures must propagate without being mistaken for invalid model output.
+    options.onAttempt?.(result, error === undefined, error);
+    if (error) throw error;
+    return result;
+  }
 
   async structured<T>(options: {
     name: string;
@@ -37,7 +82,7 @@ export class OpenAIClient {
         `Validation error: ${firstError!.message}`,
         `Prior response: ${firstRaw}`,
       ].join("\n\n");
-      const response = responseSchema.parse(await this.request("/responses", {
+      const request = await this.request("/responses", {
         model: this.config.openai.model,
         ...(this.config.openai.provider === "openai"
           ? { service_tier: this.config.openai.serviceTier }
@@ -47,13 +92,15 @@ export class OpenAIClient {
           { role: "system", content: [{ type: "input_text", text: options.system }] },
           { role: "user", content: [{ type: "input_text", text: input }] },
         ],
+        reasoning: { effort: "medium" },
         text: { format: { type: "json_schema", name: options.name, strict: true, schema: options.schema } },
-      }));
+      });
+      const response = responseSchema.parse(request.payload);
       const raw = outputText(response);
       const attemptResult: ModelResult<unknown> = {
         value: null, raw, repaired: attempt === 1, requestId: stringOrNull(response.id),
         model: typeof response.model === "string" ? response.model : this.config.openai.model,
-        serviceTier: stringOrNull(response.service_tier), usage: response.usage ?? {},
+        serviceTier: stringOrNull(response.service_tier) ?? request.requestedTier, usage: response.usage ?? {},
       };
       try {
         const parsed: unknown = JSON.parse(raw);
@@ -95,24 +142,28 @@ export class OpenAIClient {
     };
   }
 
-  private async request(path: string, body: unknown): Promise<unknown> {
+  private async request(path: string, body: Record<string, unknown>): Promise<{ payload: unknown; requestedTier: string | null }> {
     const key = requireCredentials(this.config);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.openai.timeoutMs);
     try {
-      const response = await fetch(`${this.config.openai.baseUrl}${path}`, {
-        method: "POST", signal: controller.signal,
-        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const requestId = response.headers.get("x-request-id");
-      const payload: unknown = await response.json();
-      if (!response.ok) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const fallback = attempt === 1;
+        const requestBody = fallback ? { ...body, service_tier: "auto" } : body;
+        const response = await fetch(`${this.config.openai.baseUrl}${path}`, {
+          method: "POST", signal: controller.signal,
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const requestId = response.headers.get("x-request-id");
+        const payload: unknown = await response.json();
+        if (response.ok) return { payload, requestedTier: fallback ? "default" : typeof body.service_tier === "string" ? body.service_tier : null };
         const error = apiErrorSchema.safeParse(payload);
+        if (!fallback && response.status === 429 && body.service_tier === "flex" && error.data?.error.code !== "insufficient_quota") continue;
         const message = error.success ? error.data.error.message : response.statusText;
         throw new Error(`${this.config.openai.provider} ${path} failed (${response.status}${requestId ? `, ${requestId}` : ""}): ${message}`);
       }
-      return payload;
+      throw new Error("OpenAI Flex fallback did not complete");
     } finally {
       clearTimeout(timeout);
     }
@@ -125,7 +176,7 @@ function outputText(response: z.infer<typeof responseSchema>): string {
   for (const item of response.output) {
     if (item.type !== "message" || !Array.isArray(item.content)) continue;
     for (const content of item.content) {
-      if (content.type === "refusal") throw new Error(`OpenAI refused structured request: ${content.refusal ?? "unknown reason"}`);
+      if (content.type === "refusal") throw new Error(`OpenAI refused request: ${content.refusal ?? "unknown reason"}`);
       if (content.type === "output_text" && typeof content.text === "string") return content.text;
     }
   }

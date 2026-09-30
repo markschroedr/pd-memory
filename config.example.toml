@@ -10,7 +10,7 @@ default_profile = "owner"
 provider = "openai"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 service_tier = "flex"
 store = false
 timeout_ms = 900000
@@ -23,7 +23,7 @@ retention_verified = false
 
 # OpenRouter generation: change provider to "openrouter", base_url to
 # "https://openrouter.ai/api/v1", api_key_env to "OPENROUTER_API_KEY",
-# model to e.g. "openai/gpt-5.6-luna", and service_tier to "default".
+# model to e.g. "openai/gpt-6-luna", and service_tier to "default".
 # These routing settings apply only to OpenRouter generation. Choose trusted
 # hosts for your selected model and update [pricing] for its actual rates.
 zdr = true
@@ -64,8 +64,29 @@ rrf_k = 60
 spine_share = 0.3
 per_page_cap = 6
 next_cap = 8
-# Maximum recent-history section inside a standing brief. The total brief budget still wins.
-recent_budget = 1200
+# Higher values reserve more project-brief space for closer folder-to-page matches.
+project_affinity_exponent = 4
+# Maximum share of the global standing brief for a one-line directory of top-level subjects
+# that have no observations shown. Unused directory space returns to observations.
+directory_share = 0.25
+# Minimum observations below a top-level subject before the directory lists it.
+directory_min_observations = 3
+# Composition sees a wider deterministic brief, then rewrites it to the requested budget.
+compose_input_factor = 4
+
+[timeline]
+# Calendar boundary for day consolidation. The default is Europe/Vienna.
+timezone = "Europe/Vienna"
+# Hard budgets, separate from the current-state budget.
+history_budget = 1000
+recent_budget = 800
+open_budget = 400
+
+[compose]
+# off: assembled only; global: scheduled global composition; projects: recent folders too.
+mode = "global"
+min_changes = 20
+recent_days = 14
 
 [buckets]
 bucket_3_min = 0.6
@@ -105,7 +126,7 @@ budget = 6000
 
 [pricing]
 # USD per million tokens. Keep these aligned with the configured model and tier.
-input_per_million = 0.10
-cached_input_per_million = 0.01
-output_per_million = 0.60
+input_per_million = 0.05
+cached_input_per_million = 0.005
+output_per_million = 0.25
 embedding_per_million = 0.004

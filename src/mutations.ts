@@ -15,6 +15,7 @@ export class MemoryMutations {
     vectors: Map<number, EmbeddedValue>, embeddingModel: string): { observations: number; pages: string[]; seq: number } {
     return this.store.db.transaction(() => {
       const now = new Date().toISOString();
+      const startingSeq = this.currentSeq();
       const pageByKey = new Map(proposal.pages.map((page) => [page.key, page]));
       const evidenceByCandidate = new Map(extraction.observations.map((candidate) => [candidate.candidate_id, candidate.evidence]));
       const usedPageKeys = new Set(proposal.observations.flatMap((observation) => "page_keys" in observation ? observation.page_keys : []));
@@ -62,7 +63,7 @@ export class MemoryMutations {
         if (change.op === "discard") continue;
         const oldRows = change.observation_ids.map((id) => {
           const row = this.store.db.query<ObservationRow, [string]>("SELECT * FROM observations WHERE id=?").get(id);
-          if (!row || row.replaced_by) throw new Error(`Observation ${id} is missing or superseded`);
+          if (!row || row.replaced_by || row.forgotten_at) throw new Error(`Observation ${id} is missing, superseded, or forgotten`);
           return row;
         });
         if (change.op === "attach_source") {
@@ -104,6 +105,8 @@ export class MemoryMutations {
       this.store.db.query("UPDATE sources SET participants_json=?,digest=? WHERE id=?")
         .run(JSON.stringify(submittedParticipants.length ? submittedParticipants : extraction.participants), extraction.source_digest, job.id);
       this.store.db.query("UPDATE jobs SET status='completed',error=NULL,finished_at=? WHERE id=?").run(now, job.job_id);
+      // This write transaction owns all new events, including page changes and source attachments.
+      this.store.db.query("UPDATE changes SET source_id=? WHERE seq>?").run(job.id, startingSeq);
       return { observations: changedObservations, pages: createdPages, seq: this.currentSeq() };
     })();
   }
@@ -111,6 +114,7 @@ export class MemoryMutations {
   note(input: NoteInput, embedded: EmbeddedValue, chunkEmbedded: EmbeddedValue, embeddingModel: string): { id: string; source: string; seq: number } {
     return this.store.db.transaction(() => {
       const now = new Date().toISOString();
+      const startingSeq = this.currentSeq();
       this.assertPagesActive(input.pages);
       const sourceId = this.createDirectSource(input, now);
       const chunkId = this.createDirectChunk(sourceId, input.line, chunkEmbedded, embeddingModel);
@@ -120,6 +124,7 @@ export class MemoryMutations {
         confidence: input.confidence ?? 1, weight: input.weight ?? 0.8,
         durability: input.durability ?? null, sensitivity: input.sensitivity ?? 0.3,
       }, input.pages, [sourceId], [chunkId], embedded, embeddingModel, now, input.actor, "Direct note");
+      this.store.db.query("UPDATE changes SET source_id=? WHERE seq>?").run(sourceId, startingSeq);
       return { id, source: `src:${sourceId}`, seq: this.currentSeq() };
     })();
   }
@@ -130,6 +135,7 @@ export class MemoryMutations {
       const current = this.store.db.query<ObservationRow, [string]>("SELECT * FROM observations WHERE id=?").get(input.id);
       if (!current) throw new Error(`Unknown observation ${input.id}`);
       if (current.replaced_by) throw new Error(`Observation ${input.id} is already superseded by ${current.replaced_by}`);
+      if (current.forgotten_at) throw new Error(`Observation ${input.id} is forgotten`);
       const pages = input.pages ?? (this.store.db.query("SELECT page_slug FROM observation_pages WHERE observation_id=? ORDER BY page_slug").all(input.id) as Array<{ page_slug: string }>).map((row) => row.page_slug);
       this.assertPagesActive(pages);
       const value = { ...current, ...defined(input), body: input.body === undefined ? current.body : input.body,
@@ -151,6 +157,19 @@ export class MemoryMutations {
       }
       this.updateObservation(input.id, value, pages, vector, embeddingModel, now, actor, input.reason);
       return { id: input.id, seq: this.currentSeq() };
+    })();
+  }
+
+  forget(id: string, reason: string, actor: "user" | "agent"): { id: string; seq: number } {
+    return this.store.db.transaction(() => {
+      const current = this.store.db.query<ObservationRow, [string]>("SELECT * FROM observations WHERE id=?").get(id);
+      if (!current) throw new Error(`Unknown observation ${id}`);
+      if (current.replaced_by) throw new Error(`Observation ${id} is already superseded by ${current.replaced_by}`);
+      if (current.forgotten_at) throw new Error(`Observation ${id} is already forgotten`);
+      const now = new Date().toISOString();
+      this.store.db.query("UPDATE observations SET forgotten_at=? WHERE id=?").run(now, id);
+      this.change(now, actor, "forget", id, current, reason);
+      return { id, seq: this.currentSeq() };
     })();
   }
 

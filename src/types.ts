@@ -32,7 +32,10 @@ export interface RuntimeConfig {
   ingest: { matchesPerCandidate: number };
   chunk: { targetTokens: number; singleChunkTokens: number; extractWindowTokens: number };
   search: { defaultLimit: number; maxLimit: number; rrfK: number };
-  brief: { spineShare: number; perPageCap: number; nextCap: number; recentBudget: number };
+  brief: { spineShare: number; perPageCap: number; nextCap: number; projectAffinityExponent: number; composeInputFactor: number;
+    directoryShare: number; directoryMinObservations: number };
+  timeline: { timezone: string; historyBudget: number; recentBudget: number; openBudget: number };
+  compose: { mode: "off" | "global" | "projects"; minChanges: number; recentDays: number };
   buckets: { bucket3Min: number; bucket2Min: number };
   formulas: Record<string, string>;
   callSites: { search: string; searchChunk: string; briefStanding: string; briefSituational: string; pageRank: string };

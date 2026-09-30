@@ -44,7 +44,7 @@ export OPENROUTER_API_KEY="..."
 
 Edit the configuration to set your database path, models, and identities. Review your provider's data-retention policy before setting `retention_verified=true`.
 
-The model and provider are configurable in `[openai]`, the settings for the OpenAI-compatible Responses API. The default is `gpt-5.6-luna` through direct OpenAI with Flex. OpenRouter is also supported; [config.example.toml](config.example.toml) shows the settings to change, including the allowed providers and pricing. Choose a model that supports strict JSON-schema output.
+The model and provider are configurable in `[openai]`, the settings for the OpenAI-compatible Responses API. The default is `gpt-6-luna` through direct OpenAI with Flex. OpenRouter is also supported; [config.example.toml](config.example.toml) shows the settings to change, including the allowed providers and pricing. Choose a model that supports strict JSON-schema output.
 
 Embeddings use OpenRouter or a local Perplexity service. Ingestion and searches can incur API costs.
 
@@ -56,6 +56,7 @@ bun src/cli.ts ingest --path notes.txt --kind document --label "Notes" --wait
 
 # Get an overview, find related memory, and open a result.
 bun src/cli.ts brief
+bun src/cli.ts brief --compose --budget 2000
 bun src/cli.ts search --query "project decisions"
 bun src/cli.ts open ID
 
@@ -64,6 +65,14 @@ bun src/cli.ts help
 ```
 
 Replace `ID` with an ID from the results. Add `--json` for structured output.
+
+The global overview shows History, current state, Other subjects, then Recent. Calendar-aligned day summaries compress into week segments, months, and years after each period closes. Recent shows headlines and raw lines that arrived after the last consolidated day. `open` accepts timeline IDs; `forget` removes a node and its ancestors for rebuilding.
+
+`brief --compose` stores English prose for the requested current-state scope: global, or the folder's project section. Its input has up to `brief.compose_input_factor` times the target budget (default 4), without History, Other subjects, or Recent. Composition uses the configured generation tier and medium reasoning. Plain briefs and session start read stored prose without generating it; composed text is never truncated. Citation validation removes invalid input IDs and retries only when more than 20% are invalid. Uncited text is allowed.
+
+Run `bun src/cli.ts maintain` after ingestion to consolidate closed periods and refresh compositions. `[compose] mode` is `off`, `global` (default), or `projects`. Projects refresh only for folders requested in the last `recent_days` (default 14). Existing scopes refresh after `min_changes` (default 20) change events. Each period and scope has one shared text from all material; profile sensitivity still filters underlying observations and opened evidence, not stored prose.
+
+Assembled current state keeps its requested hard budget. History and Recent have separate hard budgets: `[timeline] history_budget=1000`, `recent_budget=800`, and `open_budget=400` tokens. History overflow compresses oldest material first, then uses headlines, then removes the oldest lines. Stored project composition excludes the stored global's input IDs when generated; later overlap is tolerated without changing stored prose.
 
 ## Import coding sessions
 
@@ -79,6 +88,6 @@ bun scripts/import-sessions.ts \
 
 Repeat any input flag for more paths. `--dry-run` previews complete conversations without writing to memory or calling a model. Use `--wait` instead to import and process them, or omit both flags to queue them for the worker.
 
-Run the same command daily with cron or your scheduler. Message IDs keep repeat runs from importing the same messages again; unfinished turns wait for the next run. Use one canonical log when tools mirror each other's sessions.
+Run the same command daily with cron or your scheduler. A `--wait` import runs `maintain` after ingestion, even when there are no new messages. Message IDs keep repeat runs from importing the same messages again; unfinished turns wait for the next run. Use one canonical log when tools mirror each other's sessions.
 
 `--routes` accepts project-to-page mappings, `--after` sets a starting date, and `--user-name` sets your speaker label. See `bun scripts/import-sessions.ts --help` for the format. The existing `import-pi-sessions.ts --root ...` command still works.

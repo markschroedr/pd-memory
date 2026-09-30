@@ -68,11 +68,11 @@ const CHUNK_SYSTEM = `Split one source into passages so search can land on the r
 
 const EXTRACTION_SYSTEM = `You select durable knowledge for one person's future agents. This is long-term memory, not a session handoff or a summary of the work performed. The source remains searchable; observations carry only knowledge worth bringing into future conversations.
 
-Select the smallest useful set of knowledge that should shape understanding or decisions several weeks from now. Merely remaining true is not enough: each observation must warrant a future agent's attention. Preserve consequential intent, decisions, corrections, outcomes, open questions, and reusable lessons, with the reasons and conditions that make them useful. Routine execution and temporary task state belong only in the source, never in observation lines or bodies. Extract nothing when a passage adds no knowledge worth remembering.
+Select the smallest useful set of knowledge that should shape understanding or decisions several weeks from now. Merely remaining true is not enough: each observation must warrant a future agent's attention. Preserve consequential intent, decisions, corrections, outcomes, and reusable lessons, with the reasons and conditions that make them useful. Routine execution and temporary task state belong only in the source, never in observation lines or bodies. Open bugs, incidents, outages, and other currently unresolved defects are temporary state too: record them only as the lasting decision, constraint, or lesson they establish, never as an open issue. Extract nothing when a passage adds no knowledge worth remembering. Before proposing a claim, ask what future understanding or decision would be worse if only the searchable source retained it. A concrete idea or favorable reaction is not itself an adopted direction. Keep an unchosen option only when it establishes a lasting constraint on future work.
 
 Uncertainty: distinguish confirmed choices from proposals. When a choice, commitment, or fact is tentative, conditional, contested, or only proposed, say so in the line and lower confidence. Never record a proposal as settled. WARNING: Attribute a decision to the user only when the user explicitly confirms it; an assistant proposal is never the user's decision without that confirmation. Keep disagreements as separate claims. Prefer the latest explicit correction over superseded wording while retaining the correction's reason when useful.
 
-Lines: one standalone sentence in the source language, naming its subjects explicitly, including the product or project when needed to distinguish similar features. An optional body preserves only lasting reasons, conditions, and dependencies needed to use the knowledge correctly. Evidence citations provide traceability; the prose carries meaning rather than a verification record.
+Lines: one standalone sentence in the source language, naming its subjects explicitly, including the product or project when needed to distinguish similar features. Separate the speaker's own subject from outside systems used as comparisons; a name mentioned during a comparison is not the name of the subject being designed. Correct obvious transcription errors when the surrounding source makes the intended wording clear. If identity is uncertain, use an unambiguous description grounded in the source or omit the claim rather than guessing. An optional body preserves only lasting reasons, conditions, and dependencies needed to use the knowledge correctly. Evidence citations provide traceability; the prose carries meaning rather than a verification record.
 
 Claimant and authority: claimant is who asserted the claim; authority classifies them as user, agent, third_party, or unknown. Preserve speaker boundaries when paraphrasing: an assistant's elaboration is not the person's belief or decision. The source channel does not set authority.
 
@@ -89,9 +89,9 @@ Pages: Build a deliberately sparse directory of durable subjects that a future a
 Digest: written last, after the observations. Three to six sentences, standalone, in the source language: what kind of exchange this was, who took part, what was decided or moved, and what stayed open. It is the reader's middle step between the observations and the full text.`;
 const INTEGRATION_SYSTEM = `You edit one person's durable memory. Integrate the proposed knowledge into the smallest coherent collection that preserves useful meaning, reasons, and distinctions. Extraction proposes material; it does not determine how many observations or pages survive. Leave one retained observation for repeated knowledge, consolidating existing duplicates as well as new candidates. Keep the conditions, rationale, and operational details of one decision or behavior together in its line and body; retain independently useful claims separately.
 
-Retain only knowledge that should shape understanding or decisions several weeks from now. Merely remaining true does not make a detail worth remembering. The source preserves work history; memory preserves consequential meaning. Discard routine implementation detail, temporary task state, and execution reporting, including within otherwise useful observations.
+Retain only knowledge that should shape understanding or decisions several weeks from now. Merely remaining true does not make a detail worth remembering. The source preserves work history; memory preserves consequential meaning. Discard routine implementation detail, temporary task state, and execution reporting, including within otherwise useful observations. Open bugs, incidents, outages, and other currently unresolved defects are temporary state: keep only the lasting decision, constraint, or lesson they establish. Extraction is not approval: discard a candidate when its accurate details remain sufficient in the searchable source. Do not give a recent, named proposal high importance merely because someone discussed it seriously.
 
-Each candidate includes ranked matches into the shared existing-observation table. The directory describes existing pages. Matches suggest comparisons, not equivalence. Merge only when the evidence establishes the same subject and claim. Similar behavior in different products is not the same claim; if subject identity is uncertain, keep the claims separate. The shared source table supplies home and checkout context for existing observations. Source location is context, not proof of subject identity. Compare across candidates as well as with existing memory. Use source dates and claim context rather than arrival order to interpret changes. Preserve who established each detail: an agent's elaboration or proposal never becomes the person's belief or decision when claims are combined. WARNING: Attribute a decision to the user only when the user explicitly confirms it; an assistant proposal is never the user's decision without that confirmation. Keep uncertainty and unresolved disagreement visible.
+Each candidate includes ranked matches into the shared existing-observation table. The directory describes existing pages. Matches suggest comparisons, not equivalence. Merge only when the evidence establishes the same subject and claim. Similar behavior in different products is not the same claim; if subject identity is uncertain, keep the claims separate. The shared source table supplies home and checkout context for existing observations. Source location is context, not proof of subject identity. Compare across candidates as well as with existing memory. Compare claim dates, not ingestion order. If a later correction in existing memory retires an older candidate, do not reinstate it as current; discard it unless the dated former state itself will matter later. Preserve who established each detail: an agent's elaboration or proposal never becomes the person's belief or decision when claims are combined. WARNING: Attribute a decision to the user only when the user explicitly confirms it; an assistant proposal is never the user's decision without that confirmation. Keep uncertainty and unresolved disagreement visible.
 
 Group candidate_ids by the retained meaning. Choose discard for material not worth retaining; create for independent knowledge; attach_source when one existing observation already contains all useful detail; update to enrich that same claim; merge to consolidate several existing observations without losing their useful distinctions; supersede when new evidence replaces earlier meaning. Merge and supersede produce one replacement and preserve the old records as history. Write a short reason. Every candidate belongs to exactly one operation; each existing observation may be used at most once. Existing observations not referenced stay unchanged. Only merge may have no new candidates. Discard/create have no observation_ids; attach_source/update have one; merge and supersede have one or more. A merge combines at least two candidates or existing observations in total.
 
@@ -289,10 +289,14 @@ async function processClaimedJob(store: MemoryStore, config: RuntimeConfig, job:
       relevant_pages: [], directory_pages: 0, observations: [],
     }, ...committed };
   }
-  const candidateTexts = extraction.observations.map(observationEmbeddingText);
-  const candidateEmbeddingResult = await embeddingClient.embed(candidateTexts);
+  const candidateFacets = extraction.observations.map((candidate) =>
+    candidate.body ? [candidate.line, candidate.body] : [candidate.line]);
+  const facetTexts = [...new Set(candidateFacets.flat())];
+  const candidateEmbeddingResult = await embeddingClient.embed(facetTexts);
   store.recordModelCall(job.job_id, "embed_candidates", candidateEmbeddingResult, config);
-  const context = retrieveContext(store, extraction, candidateEmbeddingResult.value.map((x) => x.vector), config);
+  const facetVectors = new Map(facetTexts.map((text, index) => [text, candidateEmbeddingResult.value[index]!.vector]));
+  const context = retrieveContext(store, extraction,
+    candidateFacets.map((facets) => facets.map((text) => facetVectors.get(text)!)), config);
   const integrationResult = await client.structured({
     name: "pd_memory_integration", schema: INTEGRATION_SCHEMA,
     system: `${INTEGRATION_SYSTEM} ${identityInstruction(config)}`,
@@ -322,20 +326,28 @@ async function processClaimedJob(store: MemoryStore, config: RuntimeConfig, job:
   }, ...committed };
 }
 
-function retrieveContext(store: MemoryStore, extraction: Extraction, vectors: number[][], config: RuntimeConfig) {
+function retrieveContext(store: MemoryStore, extraction: Extraction, vectors: number[][][], config: RuntimeConfig) {
   const names = extraction.observations.flatMap((observation) => observation.pages.flatMap((page) => [page.name, ...page.aliases]));
   const exactPages = store.exactPages(names);
-  const matches = store.nearestObservationEmbeddings(vectors, config.embeddings.model);
-  const candidate_matches = matches.map((semantic, index) => {
-    const candidate = extraction.observations[index]!;
-    const scores = new Map(semantic.map((item) => [item.id, item.score]));
+  const searches = store.nearestObservationEmbeddings(vectors.flat(), config.embeddings.model);
+  let offset = 0;
+  const candidate_matches = extraction.observations.map((candidate, index) => {
+    const facets = searches.slice(offset, offset + vectors[index]!.length);
+    offset += facets.length;
+    const scores = new Map<string, number>();
     const fused = new Map<string, number>();
-    const rrf = (ids: string[]) => ids.forEach((id, rank) => fused.set(id, (fused.get(id) ?? 0) + 1 / (config.search.rrfK + rank + 1)));
-    rrf(semantic.slice(0, 100).map((item) => item.id));
-    rrf(store.lexicalObservationIds(observationEmbeddingText(candidate)));
+    for (const matches of facets) {
+      for (const match of matches) scores.set(match.id, Math.max(scores.get(match.id) ?? -1, match.score));
+      matches.forEach(({ id }, rank) => fused.set(id, (fused.get(id) ?? 0) + 1 / (config.search.rrfK + rank + 1)));
+    }
+    const best = [...fused.entries()].sort((a, b) => b[1] - a[1]).slice(0, config.ingest.matchesPerCandidate)
+      .map(([id]) => id);
+    const subjectMatch = candidate.pages.flatMap((page) => [page.name, ...page.aliases])
+      .map((name) => store.lexicalObservationIds(name, 1, "phrase")[0])
+      .find((id) => id && !best.includes(id));
     return { candidate_id: candidate.candidate_id,
-      matches: [...fused.entries()].sort((a, b) => b[1] - a[1]).slice(0, config.ingest.matchesPerCandidate)
-        .map(([id]) => ({ id, similarity: scores.get(id) ?? null })) };
+      matches: [...best, ...(subjectMatch ? [subjectMatch] : [])]
+        .map((id) => ({ id, similarity: scores.get(id) ?? null })) };
   });
   const ids = [...new Set(candidate_matches.flatMap((candidate) => candidate.matches.map((match) => match.id)))];
   const observations = store.observationContexts(ids);

@@ -41,6 +41,12 @@ export async function loadConfig(path: string): Promise<RuntimeConfig> {
   const chunk = table(raw.chunk, "chunk");
   const search = table(raw.search, "search");
   const brief = table(raw.brief, "brief");
+  const timeline = raw.timeline === undefined ? {} : table(raw.timeline, "timeline");
+  const timezone = text(timeline.timezone ?? "Europe/Vienna", "timeline.timezone");
+  new Intl.DateTimeFormat("en", { timeZone: timezone });
+  const compose = raw.compose === undefined ? {} : table(raw.compose, "compose");
+  const composeMode = compose.mode ?? "global";
+  if (!["off", "global", "projects"].includes(String(composeMode))) throw new Error("compose.mode must be off, global, or projects");
   const buckets = table(raw.buckets, "buckets");
   const formulas = table(raw.formulas, "formulas");
   const callSites = table(raw.call_sites, "call_sites");
@@ -108,8 +114,18 @@ export async function loadConfig(path: string): Promise<RuntimeConfig> {
       spineShare: unit(brief.spine_share, "brief.spine_share"),
       perPageCap: positiveInteger(brief.per_page_cap, "brief.per_page_cap"),
       nextCap: positiveInteger(brief.next_cap, "brief.next_cap"),
-      recentBudget: positiveInteger(brief.recent_budget, "brief.recent_budget"),
+      projectAffinityExponent: positiveInteger(brief.project_affinity_exponent ?? 4, "brief.project_affinity_exponent"),
+      directoryShare: unit(brief.directory_share ?? 0.25, "brief.directory_share"),
+      directoryMinObservations: positiveInteger(brief.directory_min_observations ?? 3, "brief.directory_min_observations"),
+      composeInputFactor: positiveInteger(brief.compose_input_factor ?? 4, "brief.compose_input_factor"),
     },
+    timeline: { timezone,
+      historyBudget: positiveInteger(timeline.history_budget ?? 1000, "timeline.history_budget"),
+      recentBudget: positiveInteger(timeline.recent_budget ?? 800, "timeline.recent_budget"),
+      openBudget: positiveInteger(timeline.open_budget ?? 400, "timeline.open_budget") },
+    compose: { mode: composeMode as RuntimeConfig["compose"]["mode"],
+      minChanges: positiveInteger(compose.min_changes ?? 20, "compose.min_changes"),
+      recentDays: positiveInteger(compose.recent_days ?? 14, "compose.recent_days") },
     buckets: { bucket3Min: unit(buckets.bucket_3_min, "buckets.bucket_3_min"), bucket2Min: unit(buckets.bucket_2_min, "buckets.bucket_2_min") },
     formulas: Object.fromEntries(Object.entries(formulas).map(([name, value]) => [name, text(value, `formulas.${name}`)])),
     callSites: {

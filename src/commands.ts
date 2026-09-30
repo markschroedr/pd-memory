@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { consolidateTimeline, openTimelineNode, forgetTimelineNode } from "./timeline";
 import { EmbeddingClient } from "./embeddings";
 import { MemoryMutations } from "./mutations";
+import { composeMemory, refreshCompositions } from "./compose";
 import { briefMemory, searchMemory, searchResultSchema as searchResult, briefResultSchema as briefResult } from "./retrieval";
 import { MemoryStore, observationEmbeddingText } from "./store";
 import { nonEmptyText, observationSchema, score } from "./observation";
@@ -15,21 +17,26 @@ export interface CommandContext {
 const profile = nonEmptyText.optional().describe("Configured profile. The default profile is used when omitted.");
 const pages = z.array(nonEmptyText).min(1);
 const actor = z.enum(["user", "agent"]);
-const openResult = z.object({ id: z.string(), kind: z.enum(["page", "observation", "source", "chunk"]) }).passthrough();
+const openResult = z.object({ id: z.string(), kind: z.enum(["page", "observation", "source", "chunk", "timeline"]) }).passthrough();
 const mutationResult = z.object({ id: z.string(), seq: z.number().int() }).passthrough();
 
 const schemas = {
+  maintain: z.strictObject({}),
+  timeline: z.strictObject({ action: z.literal("consolidate") }),
   search: z.strictObject({
     queries: z.array(nonEmptyText).min(1).describe("Search phrasings or facets supplied by the caller."),
     pages: pages.optional(), limit: z.number().int().positive().optional(),
     layer: z.enum(["observations", "chunks", "both"]).optional().describe("Retrieval layer. Defaults to both."), profile,
   }),
   brief: z.strictObject({
-    page: nonEmptyText.optional(),
+    page: nonEmptyText.optional(), folder: nonEmptyText.optional().describe("Starting folder for the project-focused brief."),
     for: nonEmptyText.optional().describe("Current situation for a relevance-ranked brief."),
     queries: z.array(nonEmptyText).min(1).optional().describe("Additional caller-supplied facets."),
-    budget: z.number().int().min(200).optional(), since: z.number().int().nonnegative().optional(), profile,
+    budget: z.number().int().min(200).optional(), since: z.number().int().nonnegative().optional(),
+    compose: z.boolean().optional().describe("Regenerate and store the requested current-state scope with the configured model."), profile,
   }),
+  focus: z.strictObject({ action: z.enum(["hide", "show"]), id: nonEmptyText, folder: nonEmptyText, profile }),
+  forget: z.strictObject({ id: nonEmptyText, reason: nonEmptyText, actor, profile }),
   open: z.strictObject({
     id: nonEmptyText, history: z.boolean().optional(),
     full: z.boolean().optional().describe("Return complete source text. Sources disclose only their digest by default."), profile,
@@ -66,16 +73,51 @@ function defineCommand<S extends z.ZodType, R>(description: string, schema: S, r
 }
 
 export const commands = {
+  maintain: defineCommand("Build closed timeline periods, then refresh stored current-state compositions.", schemas.maintain,
+    z.object({ timeline: z.unknown(), compositions: z.unknown(), latency_ms: z.number(), cost_usd: z.number() }), async (context) => {
+      const started = Date.now();
+      const before = context.store.db.query<{ cost: number }, []>("SELECT coalesce(sum(cost_usd),0) cost FROM model_calls").get()!.cost;
+      const timeline = await consolidateTimeline(context.store, context.config);
+      const compositions = await refreshCompositions(context.store, context.config);
+      const after = context.store.db.query<{ cost: number }, []>("SELECT coalesce(sum(cost_usd),0) cost FROM model_calls").get()!.cost;
+      return { timeline, compositions, latency_ms: Date.now() - started, cost_usd: after - before };
+    }),
+  timeline: defineCommand("Consolidate missing closed timeline nodes from days to years. Run after import, outside working agent sessions.",
+    schemas.timeline, z.object({ built: z.array(z.object({ id: z.string(), kind: z.enum(["day", "week", "month", "year"]) })),
+      failed: z.array(z.object({ id: z.string(), error: z.string() })), latency_ms: z.number() }),
+    (context) => consolidateTimeline(context.store, context.config)),
   search: defineCommand(
     "Find observations and source chunks with fused lexical and semantic retrieval. Search on your own initiative whenever past recorded knowledge plausibly exists and would change your answer or your work, such as an earlier decision, requirement, investigation, or failure.",
     schemas.search, searchResult, (context, args) => searchMemory(context.store, context.embeddings, context.config,
       { ...args, profile: resolveProfile(context.config, args.profile) })),
   brief: defineCommand("Assemble a standing, page, situational, or incremental brief within one budget.",
-    schemas.brief, briefResult, (context, args) => briefMemory(context.store, context.embeddings, context.config,
-      { ...args, profile: resolveProfile(context.config, args.profile) })),
-  open: defineCommand("Open one page, observation, source, or source chunk. Source text requires full=true.",
+    schemas.brief, briefResult, (context, args) => {
+      const { compose, ...briefArgs } = args;
+      const resolved = { ...briefArgs, profile: resolveProfile(context.config, args.profile) };
+      return compose ? composeMemory(context.store, context.embeddings, context.config, resolved)
+        : briefMemory(context.store, context.embeddings, context.config, resolved);
+    }),
+  focus: defineCommand("Hide or show a page or observation in this folder's project brief.",
+    schemas.focus, z.object({ id: z.string(), hidden: z.boolean() }), (context, args) => {
+      const current = context.store.open(args.id, { sensitivityMax: resolveProfile(context.config, args.profile).sensitivityMax });
+      if (current.kind !== "page" && current.kind !== "observation") throw new Error("Focus accepts a page or observation");
+      context.store.setBriefExclusion(args.folder, args.id, args.action === "hide");
+      return { id: args.id, hidden: args.action === "hide" };
+    }),
+  forget: defineCommand("Forget a timeline node for rebuilding, or an observation that is wrong, obsolete, or not worth keeping. It leaves current memory; its history, sources, and evidence remain. Use edit instead to correct or replace a claim.",
+    schemas.forget, mutationResult, (context, args) => {
+      const sensitivityMax = resolveProfile(context.config, args.profile).sensitivityMax;
+      if (/^(day|week|month|year):/.test(args.id)) {
+        return forgetTimelineNode(context.store, args.id, args.reason, args.actor);
+      }
+      const current = context.store.open(args.id, { sensitivityMax });
+      if (current.kind !== "observation") throw new Error(`${args.id} is not an observation`);
+      return new MemoryMutations(context.store).forget(args.id, args.reason, args.actor);
+    }),
+  open: defineCommand("Open one page, observation, source, source chunk, or timeline node with its cited evidence. Source text requires full=true.",
     schemas.open, openResult, (context, args) => {
       const selected = resolveProfile(context.config, args.profile);
+      if (/^(day|week|month|year):/.test(args.id)) return openTimelineNode(context.store, args.id, selected.sensitivityMax);
       return context.store.open(args.id, { history: args.history, full: args.full, sensitivityMax: selected.sensitivityMax });
     }),
   note: defineCommand("Add a direct observation to existing pages with explicit claimant authority.",
