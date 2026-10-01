@@ -42,7 +42,7 @@ export async function loadConfig(path: string): Promise<RuntimeConfig> {
   const search = table(raw.search, "search");
   const brief = table(raw.brief, "brief");
   const timeline = raw.timeline === undefined ? {} : table(raw.timeline, "timeline");
-  const timezone = text(timeline.timezone ?? "Europe/Vienna", "timeline.timezone");
+  const timezone = text(timeline.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, "timeline.timezone");
   new Intl.DateTimeFormat("en", { timeZone: timezone });
   const compose = raw.compose === undefined ? {} : table(raw.compose, "compose");
   const composeMode = compose.mode ?? "global";

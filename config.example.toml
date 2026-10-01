@@ -75,8 +75,9 @@ directory_min_observations = 3
 compose_input_factor = 4
 
 [timeline]
-# Calendar boundary for day consolidation. The default is Europe/Vienna.
-timezone = "Europe/Vienna"
+# Calendar boundary for day consolidation, as an IANA name such as "Europe/Berlin".
+# Defaults to the system timezone.
+# timezone = "Europe/Berlin"
 # Hard budgets, separate from the current-state budget.
 history_budget = 1000
 recent_budget = 800
