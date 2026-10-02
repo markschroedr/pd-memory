@@ -27,23 +27,23 @@ var extractionSystem string
 var integrationSystem string
 
 type candidatePage struct {
-	Name     string   `json:"name"`
+	Name     string   `json:"name" jsonschema:"minLength=1"`
 	Category string   `json:"category" jsonschema:"enum=actor,enum=artifact,enum=place,enum=event,enum=project,enum=topic"`
 	Aliases  []string `json:"aliases"`
 }
 type Candidate struct {
 	memory.Fields
-	CandidateID string          `json:"candidate_id"`
-	Evidence    []string        `json:"evidence"`
-	Pages       []candidatePage `json:"pages"`
+	CandidateID string          `json:"candidate_id" jsonschema:"minLength=1"`
+	Evidence    []string        `json:"evidence" jsonschema:"minItems=1"`
+	Pages       []candidatePage `json:"pages" jsonschema:"minItems=1"`
 }
 type Extraction struct {
 	Participants []string    `json:"participants"`
 	Observations []Candidate `json:"observations"`
-	Digest       string      `json:"source_digest"`
+	Digest       string      `json:"source_digest" jsonschema:"minLength=1"`
 }
 type PageProposal struct {
-	Key       string   `json:"key"`
+	Key       string   `json:"key" jsonschema:"minLength=1"`
 	Action    string   `json:"action" jsonschema:"enum=reuse,enum=create"`
 	Slug      string   `json:"slug"`
 	Category  string   `json:"category" jsonschema:"enum=actor,enum=artifact,enum=place,enum=event,enum=project,enum=topic"`
@@ -56,7 +56,7 @@ type Operation struct {
 	memory.Fields
 	CandidateIDs   []string `json:"candidate_ids"`
 	ObservationIDs []string `json:"observation_ids"`
-	Reason         string   `json:"reason"`
+	Reason         string   `json:"reason" jsonschema:"minLength=1"`
 	Op             string   `json:"op" jsonschema:"enum=discard,enum=create,enum=attach_source,enum=update,enum=merge,enum=supersede"`
 	PageKeys       []string `json:"page_keys"`
 }
@@ -65,11 +65,11 @@ type Proposal struct {
 	Observations []Operation    `json:"observations"`
 }
 type chunkStart struct {
-	Start   int    `json:"start_line"`
-	Context string `json:"context"`
+	Start   int    `json:"start_line" jsonschema:"minimum=1"`
+	Context string `json:"context" jsonschema:"minLength=1"`
 }
 type chunkOutput struct {
-	Chunks []chunkStart `json:"chunks"`
+	Chunks []chunkStart `json:"chunks" jsonschema:"minItems=1"`
 }
 
 func tokens(s string) int { return (len(strings.Fields(s))*4 + 2) / 3 }
