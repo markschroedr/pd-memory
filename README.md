@@ -4,7 +4,7 @@ Give agents an overview of what they know, then let them look up details when ne
 
 pd-memory turns conversations and documents into durable observations, grouped into pages worth returning to. New material is compared with existing memory, so repeated claims can be combined and later corrections can replace earlier ones. Each observation keeps its sources, evidence, and correction history.
 
-Experimental personal project, extracted from my daily agent setup. Built with Go and SQLite. One executable, no service.
+Experimental personal project, extracted from my daily agent setup. Built with Go and SQLite. One executable, no service. The earlier TypeScript engine remains at tag `v0.1-typescript`.
 
 ## Setup
 
