@@ -21,7 +21,7 @@ export const briefResultSchema = z.strictObject({
 });
 export type SearchHit = z.infer<typeof searchHitSchema>;
 export type SearchResult = z.infer<typeof searchResultSchema>;
-export interface BriefArgs { page?: string; folder?: string; for?: string; queries?: string[]; budget?: number; since?: number; profile: ReadProfile; projectSemantic?: boolean }
+export interface BriefArgs { page?: string; folder?: string; include_global?: boolean; for?: string; queries?: string[]; budget?: number; since?: number; profile: ReadProfile; projectSemantic?: boolean }
 export type BriefResult = z.infer<typeof briefResultSchema>;
 
 type RankedHit = { id: string; score: number } & (
@@ -178,8 +178,9 @@ async function folderBrief(store: MemoryStore, client: EmbeddingClient, config: 
   const projectShown = new Set<string>();
   const stored = storedComposition(store, config, `folder:${folder}`);
   const project = stored ? composedResult(stored, `# Project: ${parts[0] ?? folder}`, seq, projectShown)
-    : projectRows.length ? assembledBrief(store, config, projectRows, seq, Math.floor(budget / 2),
+    : projectRows.length ? assembledBrief(store, config, projectRows, seq, args.include_global === false ? budget : Math.floor(budget / 2),
       `# Project: ${parts[0] ?? folder}`, projectRows.length, profile, projectShown, pageScores) : null;
+  if (args.include_global === false) return project ?? { text: "No matching project knowledge yet.", seq, truncated: false, next: [], tokens: 8 };
   const global = globalBrief(store, config, rows, seq, Math.ceil(budget / 2), profile, projectShown);
   if (!project) return global;
   return { text: global.text + "\n\n" + project.text, seq, truncated: global.truncated || project.truncated,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { browseMemory, browseSchema, browseResultSchema } from "./browse";
 import { consolidateTimeline, openTimelineNode, forgetTimelineNode } from "./timeline";
 import { EmbeddingClient } from "./embeddings";
 import { MemoryMutations } from "./mutations";
@@ -21,6 +22,7 @@ const openResult = z.object({ id: z.string(), kind: z.enum(["page", "observation
 const mutationResult = z.object({ id: z.string(), seq: z.number().int() }).passthrough();
 
 const schemas = {
+  browse: browseSchema,
   maintain: z.strictObject({}),
   timeline: z.strictObject({ action: z.literal("consolidate") }),
   search: z.strictObject({
@@ -30,6 +32,7 @@ const schemas = {
   }),
   brief: z.strictObject({
     page: nonEmptyText.optional(), folder: nonEmptyText.optional().describe("Starting folder for the project-focused brief."),
+    include_global: z.boolean().optional().describe("Include standing global context in a folder brief. Defaults to true."),
     for: nonEmptyText.optional().describe("Current situation for a relevance-ranked brief."),
     queries: z.array(nonEmptyText).min(1).optional().describe("Additional caller-supplied facets."),
     budget: z.number().int().min(200).optional(), since: z.number().int().nonnegative().optional(),
@@ -39,6 +42,7 @@ const schemas = {
   forget: z.strictObject({ id: nonEmptyText, reason: nonEmptyText, actor, profile }),
   open: z.strictObject({
     id: nonEmptyText, history: z.boolean().optional(),
+    evidence: z.boolean().optional().describe("Expand timeline citations. Set false for lazy readers; defaults to true."),
     full: z.boolean().optional().describe("Return complete source text. Sources disclose only their digest by default."), profile,
   }),
   note: observationSchema.omit({ authority: true }).partial().extend({
@@ -73,6 +77,8 @@ function defineCommand<S extends z.ZodType, R>(description: string, schema: S, r
 }
 
 export const commands = {
+  browse: defineCommand("Browse compact subject pages, current page observations, or timeline headlines with pagination. No model calls.",
+    schemas.browse, browseResultSchema, (context, args) => browseMemory(context.store, args, resolveProfile(context.config, args.profile))),
   maintain: defineCommand("Build closed timeline periods, then refresh stored current-state compositions.", schemas.maintain,
     z.object({ timeline: z.unknown(), compositions: z.unknown(), latency_ms: z.number(), cost_usd: z.number() }), async (context) => {
       const started = Date.now();
@@ -117,7 +123,7 @@ export const commands = {
   open: defineCommand("Open one page, observation, source, source chunk, or timeline node with its cited evidence. Source text requires full=true.",
     schemas.open, openResult, (context, args) => {
       const selected = resolveProfile(context.config, args.profile);
-      if (/^(day|week|month|year):/.test(args.id)) return openTimelineNode(context.store, args.id, selected.sensitivityMax);
+      if (/^(day|week|month|year):/.test(args.id)) return openTimelineNode(context.store, args.id, selected.sensitivityMax, args.evidence);
       return context.store.open(args.id, { history: args.history, full: args.full, sensitivityMax: selected.sensitivityMax });
     }),
   note: defineCommand("Add a direct observation to existing pages with explicit claimant authority.",

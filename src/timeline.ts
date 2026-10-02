@@ -240,11 +240,12 @@ export function timelineBriefParts(store: MemoryStore, config: RuntimeConfig, se
   return { history, recent, openIds, truncated };
 }
 
-export function openTimelineNode(store: MemoryStore, id: string, sensitivityMax: number) {
+export function openTimelineNode(store: MemoryStore, id: string, sensitivityMax: number, evidence = true) {
   const node = store.db.query<TimelineNode, [string]>("SELECT * FROM timeline_nodes WHERE id=?").get(id);
   if (!node) throw new Error(`Unknown or unavailable timeline node ${id}`);
-  const children = (store.db.query<TimelineNode, []>("SELECT * FROM timeline_nodes ORDER BY starts").all()).filter(child => parentId(child.id) === id).map(child => child.id);
-  const cited = citedIds(node.text + "\n" + node.headline).flatMap<TimelineNode | ReturnType<MemoryStore["open"]>>(citation => {
+  const children = (store.db.query<Pick<TimelineNode, "id">, []>("SELECT id FROM timeline_nodes ORDER BY starts").all()).filter(child => parentId(child.id) === id).map(child => child.id);
+  const citations = citedIds(node.text + "\n" + node.headline);
+  const cited = (evidence ? citations : []).flatMap<TimelineNode | ReturnType<MemoryStore["open"]>>(citation => {
     if (/^(day|week|month|year):/.test(citation)) {
       const child = store.db.query<TimelineNode, [string]>("SELECT * FROM timeline_nodes WHERE id=?").get(citation);
       return child ? [child] : [];
@@ -252,7 +253,9 @@ export function openTimelineNode(store: MemoryStore, id: string, sensitivityMax:
     try { return [store.open(citation, { sensitivityMax })]; }
     catch { return []; } // The shared summary is readable even when some evidence is private.
   });
-  return { ...node, kind: "timeline" as const, node_kind: node.kind, children, parent: parentId(id), cited };
+  const parent = parentId(id);
+  return { ...node, kind: "timeline" as const, node_kind: node.kind, children, parent,
+    parent_available: parent !== null && Boolean(store.db.query("SELECT 1 FROM timeline_nodes WHERE id=?").get(parent)), citations, cited };
 }
 export function forgetTimelineNode(store: MemoryStore, id: string, reason: string, actor: "user" | "agent") {
   if (!reason.trim()) throw new Error("Forgetting a timeline node needs a reason");
