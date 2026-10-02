@@ -51,6 +51,8 @@ third_party_names = []
 # Top related observations per candidate; shared content is sent once.
 # Similarity supplies context, not an identity or duplication decision.
 matches_per_candidate = 5
+# Sources extracted ahead in parallel. Integration stays serial and in log order.
+extract_concurrency = 4
 
 [chunk]
 target_tokens = 400

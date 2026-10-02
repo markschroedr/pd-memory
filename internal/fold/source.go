@@ -148,6 +148,13 @@ func (w *Worker) extract(e inputlog.Entry, src inputlog.Source) (Extraction, err
 	if err != sql.ErrNoRows {
 		return Extraction{}, err
 	}
+	// A failed early extraction is this entry's attempt; do not silently spend a second one.
+	if early, ok := w.extracted[e.Seq]; ok {
+		delete(w.extracted, e.Seq)
+		if early != nil {
+			return Extraction{}, early
+		}
+	}
 	chunks, err := w.chunks(e, src)
 	if err != nil {
 		return Extraction{}, err

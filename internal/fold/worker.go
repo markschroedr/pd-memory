@@ -26,6 +26,9 @@ type Worker struct {
 	Model  *model.Client
 	Seq    int64
 	out    *Outcome
+	// Extraction runs ahead of serial integration. Each in-flight seq reports its result once.
+	extracting map[int64]chan error
+	extracted  map[int64]error
 }
 type Outcome struct {
 	Processed   []int64     `json:"processed"`
@@ -112,21 +115,77 @@ func New(c *config.Config) (*Worker, error) {
 		l.Close()
 		return nil, e
 	}
-	w := &Worker{Config: c, Log: l, Memory: s}
-	w.Model = &model.Client{Config: c, Record: func(call model.Call) error {
-		var seq any
-		if w.Seq > 0 {
-			seq = w.Seq
+	w := &Worker{Config: c, Log: l, Memory: s, extracting: map[int64]chan error{}, extracted: map[int64]error{}}
+	w.Model = w.client(func() int64 { return w.Seq })
+	return w, nil
+}
+
+// client records model calls against the log seq being worked on. Each seq has at most one call in flight.
+func (w *Worker) client(current func() int64) *model.Client {
+	seq := func() any {
+		if n := current(); n > 0 {
+			return n
 		}
-		return s.Tx(func(conn *sql.Conn) error {
-			return memory.Exec(conn, "INSERT INTO model_calls(seq,phase,request_id,model,tier,usage,cost_usd,repaired,error,created) VALUES(?,?,?,?,?,?,?,?,?,?)", seq, call.Phase, call.RequestID, call.Model, call.Tier, memory.JSON(call.Usage), call.Cost, call.Repaired, call.Error, time.Now().UTC().Format(time.RFC3339Nano))
+		return nil
+	}
+	return &model.Client{Config: w.Config, Record: func(call model.Call) error {
+		return w.Memory.Tx(func(conn *sql.Conn) error {
+			return memory.Exec(conn, "INSERT INTO model_calls(seq,phase,request_id,model,tier,usage,cost_usd,repaired,error,created) VALUES(?,?,?,?,?,?,?,?,?,?)", seq(), call.Phase, call.RequestID, call.Model, call.Tier, memory.JSON(call.Usage), call.Cost, call.Repaired, call.Error, time.Now().UTC().Format(time.RFC3339Nano))
 		})
 	}, Invalid: func(err error) error {
-		return s.Tx(func(conn *sql.Conn) error {
-			return memory.Exec(conn, "UPDATE model_calls SET phase=phase||'_invalid',error=? WHERE id=(SELECT max(id) FROM model_calls)", err.Error())
+		return w.Memory.Tx(func(conn *sql.Conn) error {
+			return memory.Exec(conn, "UPDATE model_calls SET phase=phase||'_invalid',error=? WHERE id=(SELECT max(id) FROM model_calls WHERE seq IS ?)", err.Error(), seq())
 		})
 	}}
-	return w, nil
+}
+
+// extractAhead starts extraction for upcoming eligible sources, up to the configured concurrency.
+// Integration stays serial and in log order; only the expensive, independent extraction runs early.
+func (w *Worker) extractAhead(entries []inputlog.Entry, from int64) error {
+	for _, e := range entries {
+		if len(w.extracting) >= w.Config.Ingest.ExtractConcurrency {
+			return nil
+		}
+		if e.Kind != "source" || e.Seq < from || w.extracting[e.Seq] != nil {
+			continue
+		}
+		if _, done := w.extracted[e.Seq]; done {
+			continue
+		}
+		ok, err := w.eligible(e)
+		if err != nil {
+			return err
+		}
+		var cached int
+		if err = w.Memory.DB.QueryRow("SELECT count(*) FROM extraction WHERE seq=?", e.Seq).Scan(&cached); err != nil {
+			return err
+		}
+		if !ok || cached > 0 {
+			continue
+		}
+		var src inputlog.Source
+		if err = model.Decode(e.Payload, &src); err != nil {
+			return err
+		}
+		ahead := &Worker{Config: w.Config, Log: w.Log, Memory: w.Memory, Seq: e.Seq}
+		seq := e.Seq
+		ahead.Model = ahead.client(func() int64 { return seq })
+		done := make(chan error, 1)
+		w.extracting[e.Seq] = done
+		go func(e inputlog.Entry) {
+			_, err := ahead.extract(e, src)
+			done <- err
+		}(e)
+	}
+	return nil
+}
+
+// awaitExtraction collects the early extraction result for seq, if one was started.
+func (w *Worker) awaitExtraction(seq int64) {
+	if done := w.extracting[seq]; done != nil {
+		w.extracted[seq] = <-done
+		delete(w.extracting, seq)
+	}
 }
 func (w *Worker) Close() { w.Memory.Close(); w.Log.Close() }
 func (w *Worker) done(c *sql.Conn, seq int64, message string) error {
@@ -210,6 +269,12 @@ func (w *Worker) drain(out *Outcome) error {
 		}
 		if next == nil {
 			return nil
+		}
+		if next.Kind == "source" {
+			if e = w.extractAhead(entries, next.Seq); e != nil {
+				return e
+			}
+			w.awaitExtraction(next.Seq)
 		}
 		if e = w.foldOne(*next); e != nil {
 			return e
