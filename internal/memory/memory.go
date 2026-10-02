@@ -33,11 +33,17 @@ func (f Fields) Validate() error {
 	if f.Body != nil && strings.TrimSpace(*f.Body) == "" {
 		return fmt.Errorf("body must not be empty")
 	}
-	if !member([]string{"user", "agent", "third_party", "unknown"}, f.Authority) || !member([]string{"fact", "question", "commitment"}, f.Kind) {
-		return fmt.Errorf("invalid authority or kind")
+	if !member([]string{"user", "agent", "third_party", "unknown"}, f.Authority) {
+		return fmt.Errorf("authority %q must be user, agent, third_party, or unknown", f.Authority)
 	}
-	if f.Confidence < 0 || f.Confidence > 1 || f.Weight < 0 || f.Weight > 1 || (f.Durability != nil && *f.Durability <= 0) {
-		return fmt.Errorf("invalid scores")
+	if !member([]string{"fact", "question", "commitment"}, f.Kind) {
+		return fmt.Errorf("kind %q must be fact, question, or commitment", f.Kind)
+	}
+	if f.Confidence < 0 || f.Confidence > 1 || f.Weight < 0 || f.Weight > 1 {
+		return fmt.Errorf("confidence %v and weight %v must be between 0 and 1", f.Confidence, f.Weight)
+	}
+	if f.Durability != nil && *f.Durability <= 0 {
+		return fmt.Errorf("durability %v must be positive days or null", *f.Durability)
 	}
 	return Date(f.Happened)
 }
@@ -48,8 +54,10 @@ func Date(s *string) error {
 	if _, e := time.Parse("2006-01-02", *s); e == nil {
 		return nil
 	}
-	_, e := time.Parse(time.RFC3339Nano, *s)
-	return e
+	if _, e := time.Parse(time.RFC3339Nano, *s); e != nil {
+		return fmt.Errorf("happened %q must be YYYY-MM-DD or an RFC 3339 datetime", *s)
+	}
+	return nil
 }
 func member(xs []string, s string) bool {
 	for _, x := range xs {

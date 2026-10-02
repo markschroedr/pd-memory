@@ -94,8 +94,15 @@ func (w *Worker) chunks(e inputlog.Entry, src inputlog.Source) ([]memory.Chunk, 
 		result, err := model.Structured[chunkOutput](w.Model, "chunks", chunkSystem+fmt.Sprintf(" Aim for about %d estimated tokens per passage.", w.Config.Chunk.TargetTokens), "<source>\n"+strings.Join(numbered, "\n")+"\n</source>", func(out chunkOutput) error {
 			last := 0
 			for i, c := range out.Chunks {
-				if c.Start <= last || c.Start > len(lines) || (i == 0 && c.Start != 1) || strings.TrimSpace(c.Context) == "" {
-					return fmt.Errorf("invalid chunk starts")
+				switch {
+				case i == 0 && c.Start != 1:
+					return fmt.Errorf("chunks[0].start_line is %d; the first chunk must start at line 1", c.Start)
+				case c.Start < 1 || c.Start > len(lines):
+					return fmt.Errorf("chunks[%d].start_line %d is outside lines 1 to %d", i, c.Start, len(lines))
+				case c.Start <= last:
+					return fmt.Errorf("chunks[%d].start_line %d does not increase after %d; chunk starts must strictly increase", i, c.Start, last)
+				case strings.TrimSpace(c.Context) == "":
+					return fmt.Errorf("chunks[%d].context is empty", i)
 				}
 				last = c.Start
 			}
@@ -178,20 +185,30 @@ func (w *Worker) extract(e inputlog.Entry, src inputlog.Source) (Extraction, err
 			seen := map[string]bool{}
 			for _, o := range x.Observations {
 				if err := o.Fields.Validate(); err != nil {
-					return err
+					return fmt.Errorf("observation %s: %w", o.CandidateID, err)
 				}
-				if o.CandidateID == "" || seen[o.CandidateID] || len(o.Pages) == 0 || len(o.Evidence) == 0 {
-					return fmt.Errorf("invalid candidate IDs, pages or evidence")
+				switch {
+				case o.CandidateID == "":
+					return fmt.Errorf("observation %q has an empty candidate_id", o.Line)
+				case seen[o.CandidateID]:
+					return fmt.Errorf("duplicate candidate_id %s", o.CandidateID)
+				case len(o.Pages) == 0:
+					return fmt.Errorf("observation %s needs at least one page", o.CandidateID)
+				case len(o.Evidence) == 0:
+					return fmt.Errorf("observation %s needs evidence", o.CandidateID)
 				}
 				seen[o.CandidateID] = true
-				for _, id := range o.Evidence {
+				for j, id := range o.Evidence {
+					// Models sometimes copy the rendered [id] brackets. The slice shares the decoded result.
+					id = strings.TrimSuffix(strings.TrimPrefix(id, "["), "]")
+					o.Evidence[j] = id
 					if !allowed[id] {
-						return fmt.Errorf("invalid evidence %s", id)
+						return fmt.Errorf("observation %s cites %s; valid ids are %s to %s", o.CandidateID, id, window[0].ID, window[len(window)-1].ID)
 					}
 				}
 				for _, p := range o.Pages {
 					if p.Name == "" || !config.Contains([]string{"actor", "artifact", "place", "event", "project", "topic"}, p.Category) {
-						return fmt.Errorf("invalid candidate page")
+						return fmt.Errorf("observation %s has page %q with category %q; categories are actor, artifact, place, event, project, topic", o.CandidateID, p.Name, p.Category)
 					}
 				}
 			}
@@ -352,39 +369,52 @@ func validateProposal(p Proposal, ex Extraction, pages []memory.Page, observatio
 	redirects := map[string]string{}
 	for _, page := range p.Pages {
 		_, exists := existing[page.Slug]
-		if page.Key == "" || keys[page.Key] != "" || slugs[page.Slug] || !slug.MatchString(page.Slug) || (page.Action != "reuse" && page.Action != "create") || (page.Action == "reuse" && !exists) || (page.Action == "create" && exists) || !config.Contains([]string{"actor", "artifact", "place", "event", "project", "topic"}, page.Category) {
-			return fmt.Errorf("invalid page proposal %s", page.Slug)
+		switch {
+		case page.Key == "" || keys[page.Key] != "":
+			return fmt.Errorf("page %s has an empty or repeated key %q", page.Slug, page.Key)
+		case slugs[page.Slug]:
+			return fmt.Errorf("page %s is proposed twice", page.Slug)
+		case !slug.MatchString(page.Slug):
+			return fmt.Errorf("page slug %q must match %s", page.Slug, slug.String())
+		case page.Action == "reuse" && !exists:
+			return fmt.Errorf("page %s uses reuse but does not exist; use create", page.Slug)
+		case page.Action == "create" && exists:
+			return fmt.Errorf("page %s uses create but already exists; use reuse", page.Slug)
+		case page.Action != "reuse" && page.Action != "create":
+			return fmt.Errorf("page %s has action %q; use reuse or create", page.Slug, page.Action)
+		case !config.Contains([]string{"actor", "artifact", "place", "event", "project", "topic"}, page.Category):
+			return fmt.Errorf("page %s has category %q; categories are actor, artifact, place, event, project, topic", page.Slug, page.Category)
 		}
 		keys[page.Key] = page.Slug
 		slugs[page.Slug] = true
 		if page.Line != nil && retrieve.Normalize(*page.Line) == retrieve.Normalize(page.Slug) {
-			return fmt.Errorf("page line repeats slug")
+			return fmt.Errorf("page %s line only repeats its slug; describe the subject or use null", page.Slug)
 		}
 		if page.Action == "create" {
 			parents[page.Slug] = "root"
 		}
 		if page.Parent != nil {
 			if page.Slug == "root" {
-				return fmt.Errorf("cannot reparent root")
+				return fmt.Errorf("page root cannot have a parent")
 			}
 			parents[page.Slug] = *page.Parent
 		}
 		if len(page.MergeFrom) > 0 && page.Action != "reuse" {
-			return fmt.Errorf("merge must reuse page")
+			return fmt.Errorf("page %s has merge_from, so its action must be reuse", page.Slug)
 		}
 		for _, from := range page.MergeFrom {
 			if from == "root" || from == page.Slug || redirects[from] != "" {
-				return fmt.Errorf("invalid page merge")
+				return fmt.Errorf("page %s cannot merge from %s (root, itself, or already merged)", page.Slug, from)
 			}
 			if _, ok := existing[from]; !ok {
-				return fmt.Errorf("unknown page merge source")
+				return fmt.Errorf("page %s merges from unknown page %s", page.Slug, from)
 			}
 			redirects[from] = page.Slug
 		}
 	}
 	for from, into := range redirects {
 		if slugs[from] {
-			return fmt.Errorf("overlapping page merges")
+			return fmt.Errorf("page %s is merged into %s and also proposed itself", from, into)
 		}
 		delete(parents, from)
 		for id, parent := range parents {
@@ -397,10 +427,10 @@ func validateProposal(p Proposal, ex Extraction, pages []memory.Page, observatio
 		seen := map[string]bool{}
 		for x := id; x != ""; x = parents[x] {
 			if seen[x] {
-				return fmt.Errorf("page hierarchy cycle")
+				return fmt.Errorf("page %s has a parent cycle through %s", id, x)
 			}
 			if _, ok := parents[x]; !ok {
-				return fmt.Errorf("unknown parent %s", x)
+				return fmt.Errorf("page %s has unknown parent %s", id, x)
 			}
 			seen[x] = true
 		}
@@ -413,10 +443,10 @@ func validateProposal(p Proposal, ex Extraction, pages []memory.Page, observatio
 		for _, name := range aliases {
 			n := retrieve.Normalize(name)
 			if n == "" {
-				return fmt.Errorf("empty page name")
+				return fmt.Errorf("page %s has an empty alias", owner)
 			}
 			if old := names[n]; old != "" && old != owner {
-				return fmt.Errorf("page name conflicts with %s", old)
+				return fmt.Errorf("page %s name or alias %q already belongs to page %s; reuse that page or merge", owner, name, old)
 			}
 			names[n] = owner
 		}
@@ -442,49 +472,66 @@ func validateProposal(p Proposal, ex Extraction, pages []memory.Page, observatio
 	for _, o := range observations {
 		allowed[o.ID] = true
 	}
-	for _, op := range p.Observations {
-		if op.Reason == "" || !config.Contains([]string{"discard", "create", "attach_source", "update", "merge", "supersede"}, op.Op) {
-			return fmt.Errorf("invalid operation")
+	for i, op := range p.Observations {
+		where := fmt.Sprintf("observations[%d] (%s)", i, op.Op)
+		if !config.Contains([]string{"discard", "create", "attach_source", "update", "merge", "supersede"}, op.Op) {
+			return fmt.Errorf("%s: op must be discard, create, attach_source, update, merge, or supersede", where)
+		}
+		if op.Reason == "" {
+			return fmt.Errorf("%s needs a reason", where)
 		}
 		if len(op.CandidateIDs) == 0 && op.Op != "merge" {
-			return fmt.Errorf("operation needs candidates")
+			return fmt.Errorf("%s needs candidate_ids", where)
 		}
 		for _, id := range op.CandidateIDs {
-			if !expected[id] || seen[id] {
-				return fmt.Errorf("unknown or repeated candidate %s", id)
+			if !expected[id] {
+				return fmt.Errorf("%s uses unknown candidate %s", where, id)
+			}
+			if seen[id] {
+				return fmt.Errorf("%s repeats candidate %s; every candidate belongs to exactly one operation", where, id)
 			}
 			seen[id] = true
 		}
 		for _, id := range op.ObservationIDs {
-			if !allowed[id] || used[id] {
-				return fmt.Errorf("unknown or repeated observation %s", id)
+			if !allowed[id] {
+				return fmt.Errorf("%s uses unknown existing observation %s", where, id)
+			}
+			if used[id] {
+				return fmt.Errorf("%s repeats existing observation %s; each may be used at most once", where, id)
 			}
 			used[id] = true
 		}
 		n := len(op.ObservationIDs)
 		if ((op.Op == "discard" || op.Op == "create") && n != 0) || ((op.Op == "attach_source" || op.Op == "update") && n != 1) || (op.Op == "merge" && (n < 1 || n+len(op.CandidateIDs) < 2)) || (op.Op == "supersede" && n < 1) {
-			return fmt.Errorf("invalid target count for %s", op.Op)
+			return fmt.Errorf("%s has %d observation_ids; discard and create take none, attach_source and update exactly one, supersede one or more, merge one or more with at least two items in total", where, n)
 		}
 		if op.Op == "discard" || op.Op == "attach_source" {
 			if op.Line != "" || op.Body != nil || op.Happened != nil || op.Claimant != nil || op.Authority != "" || op.Kind != "" || op.Confidence != 0 || op.Weight != 0 || op.Durability != nil || len(op.PageKeys) != 0 {
-				return fmt.Errorf("unused payload must be null")
+				return fmt.Errorf("%s must leave line, body, scores, and page_keys null or empty", where)
 			}
 			continue
 		}
 		if err := op.Fields.Validate(); err != nil {
-			return err
+			return fmt.Errorf("%s: %w", where, err)
 		}
 		if len(op.PageKeys) == 0 {
-			return fmt.Errorf("retained observation needs pages")
+			return fmt.Errorf("%s needs page_keys", where)
 		}
 		for _, k := range op.PageKeys {
 			if keys[k] == "" {
-				return fmt.Errorf("unknown page key")
+				return fmt.Errorf("%s uses unknown page key %q; use a key from pages", where, k)
 			}
 		}
 	}
-	if len(seen) != len(expected) {
-		return fmt.Errorf("every candidate must appear exactly once")
+	missing := []string{}
+	for id := range expected {
+		if !seen[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("candidates %s appear in no operation; every candidate must appear exactly once", strings.Join(missing, ", "))
 	}
 	return nil
 }
