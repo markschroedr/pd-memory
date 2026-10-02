@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 236" width="760" height="236" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <style>
+    .g { stroke: #8b949e; }
+    .f { fill: #8b949e; stroke: none; }
+    .a { stroke: #d39b52; }
+    .af { fill: #d39b52; stroke: none; }
+    text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; fill: #8b949e; }
+    .t { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+    .s { font-size: 11.5px; opacity: .8; }
+  </style>
+
+  <!-- log: append-only entries -->
+  <g stroke-width="1.6">
+    <rect class="g" x="40"  y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="64"  y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="88"  y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="112" y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="136" y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="160" y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="184" y="84" width="18" height="18" rx="3" opacity=".55"/>
+    <rect class="g" x="208" y="84" width="18" height="18" rx="3"/>
+    <rect class="g" x="232" y="84" width="18" height="18" rx="3"/>
+    <rect class="a" x="256" y="84" width="18" height="18" rx="3" stroke-width="2"/>
+    <rect class="a" x="280" y="84" width="18" height="18" rx="3" stroke-dasharray="2 4" opacity=".7"/>
+  </g>
+  <!-- new entry arriving -->
+  <path class="a" d="M289 40 L289 72" stroke-width="1.6" stroke-dasharray="1 5"/>
+  <path class="a" d="M284 66 L289 73 L294 66" stroke-width="1.6"/>
+  <text class="s" x="300" y="48">sources, notes, corrections</text>
+
+  <text class="t" x="40" y="140">log.db</text>
+  <text class="s" x="40" y="158">append-only, the one thing to back up</text>
+
+  <!-- worker folds the log into memory -->
+  <path class="g" d="M318 93 L 398 93" stroke-width="1.6"/>
+  <circle class="a" cx="420" cy="93" r="13" stroke-width="2"/>
+  <circle class="af" cx="420" cy="93" r="3.5"/>
+  <path class="g" d="M442 93 L 500 93" stroke-width="1.6"/>
+  <path class="g" d="M494 88 L501 93 L494 98" stroke-width="1.6"/>
+  <text class="t" x="400" y="140">worker</text>
+
+  <!-- memory: pages and their observations -->
+  <g stroke-width="1.5" opacity=".5">
+    <line class="g" x1="574.8" y1="67.4" x2="625.2" y2="58.6"/>
+    <line class="g" x1="568.5" y1="82.3" x2="591.5" y2="115.7"/>
+    <line class="g" x1="650.0" y1="67.2" x2="680.0" y2="100.8"/>
+    <line class="g" x1="614.8" y1="125.4" x2="675.2" y2="114.6"/>
+  </g>
+  <g stroke-width="1.8">
+    <circle class="g" cx="560" cy="70"  r="11"/>
+    <circle class="g" cx="640" cy="56"  r="11"/>
+    <circle class="g" cx="600" cy="128" r="11"/>
+    <circle class="a" cx="690" cy="112" r="11" stroke-width="2"/>
+  </g>
+  <g>
+    <circle class="f" cx="553.0" cy="90" r="1.8"/><circle class="f" cx="560.0" cy="90" r="1.8"/><circle class="f" cx="567.0" cy="90" r="1.8"/><circle class="f" cx="636.5" cy="76" r="1.8"/><circle class="f" cx="643.5" cy="76" r="1.8"/><circle class="f" cx="596.5" cy="148" r="1.8"/><circle class="f" cx="603.5" cy="148" r="1.8"/><circle class="af" cx="683.0" cy="132" r="1.8"/><circle class="af" cx="690.0" cy="132" r="1.8"/><circle class="af" cx="697.0" cy="132" r="1.8"/>
+  </g>
+  <text class="t" x="540" y="172">memory.db</text>
+  <text class="s" x="540" y="190">derived, delete it and rebuild</text>
+
+  <!-- rebuild -->
+  <path class="g" d="M170 172 C 230 214, 440 214, 520 180" stroke-width="1.3" stroke-dasharray="1 5" opacity=".6"/>
+  <path class="g" d="M512 178 L521 180 L516 188" stroke-width="1.3" opacity=".6"/>
+  <text class="s" x="322" y="228" opacity=".7">rebuild</text>
+</svg>
