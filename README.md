@@ -2,92 +2,62 @@
 
 Give agents an overview of what they know, then let them look up details when needed.
 
-pd-memory turns conversations and documents into memory organized by topic. The goal is to help an agent notice relevant past decisions and context, even when you haven't explicitly asked it to remember something.
+pd-memory turns conversations and documents into durable observations, grouped into pages worth returning to. New material is compared with existing memory, so repeated claims can be combined and later corrections can replace earlier ones. Each observation keeps its sources, evidence, and correction history.
 
-Experimental personal project, extracted from my daily agent setup.
-
-## How it works
-
-1. Read conversations and documents.
-2. Keep useful facts and decisions, grouped by topic.
-3. Update existing memory as new information arrives.
-4. Give the agent a short overview, with tools to search and open more detail.
-
-Each memory links back to its sources. Corrections keep the earlier version and its history.
-
-Built with Bun, TypeScript, and SQLite. Use it through the CLI or the `PdMemoryRuntime` library.
-
-## Design
-
-An agent can search its history, but it needs some idea of what is there in the first place. The top level is meant to read like a dictionary, with short entries that can be opened in more detail.
-
-New material goes through two passes: extraction proposes observations, then integration compares them with existing memory. This is also where repeated information is combined and things that are unlikely to matter a few weeks later are dropped. Pages are for subjects worth returning to, rather than every person or object mentioned in a conversation.
-
-When a claim is replaced, the old version stays in its history. Each claim also records who made it, independently of whether it came from a chat, a meeting, or a document. An agent's suggestion should remain an agent's suggestion until the user actually agrees to it.
-
-## Pi
-
-The [Pi extension](integrations/pi.ts) adds a standing overview at session start and tools to search, open, and add memories; its settings live in `~/.config/pd-memory/pi.json`.
+Experimental personal project, extracted from my daily agent setup. Built with Go and SQLite. One executable, no service.
 
 ## Setup
 
-Requires Bun 1.3+.
-
 ```sh
-bun install --frozen-lockfile
-mkdir -p ~/.config/pd-memory
-export PD_MEMORY_CONFIG="$HOME/.config/pd-memory/pd-memory.toml"
-cp -n config.example.toml "$PD_MEMORY_CONFIG"
-export OPENAI_API_KEY="..."
-export OPENROUTER_API_KEY="..."
+go build -o pd-memory .
+cp config.example.toml /path/outside/git/pd-memory.toml
+export PD_MEMORY_CONFIG=/path/outside/git/pd-memory.toml
 ```
 
-Edit the configuration to set your database path, models, and identities. Review your provider's data-retention policy before setting `retention_verified=true`.
+Set the workspace directory, identity names, providers, and prices in the configuration. Credentials come from environment variables. Verify your provider's retention controls before enabling `retention_verified`.
 
-The model and provider are configurable in `[openai]`, the settings for the OpenAI-compatible Responses API. The default is `gpt-6-luna` through direct OpenAI with Flex. OpenRouter is also supported; [config.example.toml](config.example.toml) shows the settings to change, including the allowed providers and pricing. Choose a model that supports strict JSON-schema output.
-
-Embeddings use OpenRouter or a local Perplexity service. Ingestion and searches can incur API costs.
+Generation supports direct OpenAI Responses with Flex, or OpenRouter with explicit zero-retention routing. Embeddings use OpenRouter or a local Perplexity service. There is no fallback between embedding providers. Model calls incur costs; `stats` shows recorded usage and estimated cost.
 
 ## Use
 
 ```sh
-# Add a document.
-bun src/cli.ts ingest --path notes.txt --kind document --label "Notes" --wait
-
-# Get an overview, find related memory, and open a result.
-bun src/cli.ts brief
-bun src/cli.ts brief --compose --budget 2000
-bun src/cli.ts search --query "project decisions"
-bun src/cli.ts open ID
-
-# See all commands.
-bun src/cli.ts help
+pd-memory ingest --path notes.txt --kind document --label Notes --wait
+pd-memory brief
+pd-memory search --query "architecture decisions"
+pd-memory open ID --history
+pd-memory note --line "A durable observation." --page root --actor user --wait
+pd-memory help
 ```
 
-Replace `ID` with an ID from the results. Add `--json` for structured output.
+Add `--json` for machine output. `catalog` exposes command input and result schemas with the engine version. `brief --folder PATH` adds project context; `focus` adjusts that folder's selection. Plain reads never generate summaries or write to memory.
 
-The global overview shows History, current state, Other subjects, then Recent. Calendar-aligned day summaries compress into week segments, months, and years after each period closes. Recent shows headlines and raw lines that arrived after the last consolidated day. `open` accepts timeline IDs; `forget` removes a node and its ancestors for rebuilding.
+Ingestion and user mutations append to `log.db` and wake one locked worker. Without `--wait`, it reports queued work. The worker updates `memory.db`, then builds missing closed-period summaries and refreshes due current-state compositions. No timers or host maintenance calls are needed. Quiet workspaces wait for the next ingestion; `maintain` and `brief --compose` are manual alternatives.
 
-`brief --compose` stores English prose for the requested current-state scope: global, or the folder's project section. Its input has up to `brief.compose_input_factor` times the target budget (default 4), without History, Other subjects, or Recent. Composition uses the configured generation tier and medium reasoning. Plain briefs and session start read stored prose without generating it; composed text is never truncated. Citation validation removes invalid input IDs and retries only when more than 20% are invalid. Uncited text is allowed.
+Back up `log.db`: it is the canonical, append-only record. `memory.db` is rebuildable. `rebuild` makes paid calls and preserves the old projection beside the new one. Workspaces, not read filters, are the privacy boundary.
 
-Run `bun src/cli.ts maintain` after ingestion to consolidate closed periods and refresh compositions. `[compose] mode` is `off`, `global` (default), or `projects`. Projects refresh only for folders requested in the last `recent_days` (default 14). Existing scopes refresh after `min_changes` (default 20) change events. Each period and scope has one shared text from all material; profile sensitivity still filters underlying observations and opened evidence, not stored prose.
+## TypeScript hosts
 
-Assembled current state keeps its requested hard budget. History and Recent have separate hard budgets: `[timeline] history_budget=1000`, `recent_budget=800`, and `open_budget=400` tokens. History overflow compresses oldest material first, then uses headlines, then removes the oldest lines. Stored project composition excludes the stored global's input IDs when generated; later overlap is tolerated without changing stored prose.
+Use `MemoryClient` from `integrations/client.ts`. Its `call(command, input)` returns the command's typed result. It checks the binary version on first use and reports conflicts separately from other failures.
 
-## Import coding sessions
-
-The bundled importer reads Pi, Claude Code, and Codex session logs. Point it at the files or folders you use:
+Regenerate the committed types after command changes:
 
 ```sh
-bun scripts/import-sessions.ts \
-  --pi ~/.pi/agent/sessions \
-  --claude-code ~/.claude/projects \
-  --codex ~/.codex/sessions \
-  --dry-run
+pd-memory catalog --typescript > integrations/types.ts
 ```
 
-Repeat any input flag for more paths. `--dry-run` previews complete conversations without writing to memory or calling a model. Use `--wait` instead to import and process them, or omit both flags to queue them for the worker.
+## Coding sessions and Pi
 
-Run the same command daily with cron or your scheduler. A `--wait` import runs `maintain` after ingestion, even when there are no new messages. Message IDs keep repeat runs from importing the same messages again; unfinished turns wait for the next run. Use one canonical log when tools mirror each other's sessions.
+```sh
+pd-memory import sessions --pi /path/to/pi/sessions --dry-run
+pd-memory import sessions --pi /path/to/pi/sessions --wait
+```
 
-`--routes` accepts project-to-page mappings, `--after` sets a starting date, and `--user-name` sets your speaker label. See `bun scripts/import-sessions.ts --help` for the format. The existing `import-pi-sessions.ts --root ...` command still works.
+The importer also accepts repeatable `--claude-code` and `--codex` paths. It reads canonical completed exchanges, skips subagents, and records message IDs so later imports capture only new messages. Routes and machine-specific fetching stay outside the repository.
+
+The [Pi extension](integrations/pi.ts) adds a standing brief and memory tools. Its settings live in `~/.config/pd-memory/pi.json`:
+
+```json
+{"binary":"pd-memory","config":"/absolute/path/to/pd-memory.toml"}
+```
+
+Capture defaults to daily imports; `capture_mode: "live"` enables after-turn capture.
