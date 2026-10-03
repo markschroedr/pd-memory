@@ -98,7 +98,7 @@ type Definition struct {
 
 func definitions() []Definition {
 	return []Definition{
-		{Name: "search", Description: "Find observations and source chunks with hybrid retrieval. Supply query facets. Search whenever prior knowledge could change your work.", New: func() any { return new(SearchInput) }},
+		{Name: "search", Description: "Find observations and source chunks with hybrid retrieval. Supply query facets. Search whenever prior knowledge could change your work. When the person's circumstances could matter, consider also exploring related facts the request itself does not mention.", New: func() any { return new(SearchInput) }},
 		{Name: "brief", Description: "Read a standing, page, folder, situational, or since brief. Plain reads never generate text. compose regenerates the current-state scope.", New: func() any { return new(brief.Args) }},
 		{Name: "open", Description: "Open a page, observation, source, chunk, or timeline view. history shows contributions and replacements; full includes raw source text.", New: func() any { return new(OpenInput) }},
 		{Name: "browse", Description: "Browse pages, page observations, or history headlines with pagination. No model calls.", New: func() any { return new(BrowseInput) }},
