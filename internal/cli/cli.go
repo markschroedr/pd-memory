@@ -18,7 +18,6 @@ import (
 	inputlog "github.com/markschroedr/pd-memory/internal/log"
 	"github.com/markschroedr/pd-memory/internal/memory"
 	"github.com/markschroedr/pd-memory/internal/model"
-	"github.com/markschroedr/pd-memory/internal/retrieve"
 )
 
 const Help = `pd-memory — progressive-disclosure memory
@@ -26,8 +25,8 @@ const Help = `pd-memory — progressive-disclosure memory
 Usage: pd-memory COMMAND [options] [--config FILE] [--json]
 
 Agent commands:
-  search --query TEXT [--query FACET] [--page PAGE] [--layer both|observations|chunks]
-  brief [--page PAGE | --folder PATH | --for SITUATION | --since SEQ] [--budget N] [--compose]
+  recall [--for TEXT] [--query FACET] [--page PAGE] [--budget N]
+  brief [--page PAGE | --folder PATH | --since SEQ] [--budget N] [--compose]
   open ID [--history] [--full]
   browse [--view pages|page|history] [--id PAGE] [--period month] [--limit N] [--offset N]
   note --line TEXT --page PAGE --actor user|agent [observation fields] [--wait]
@@ -307,7 +306,7 @@ func run(args []string) (code int, err error) {
 	}
 	if command == "brief" && input.(*brief.Args).Compose {
 		a := input.(*brief.Args)
-		if a.Page != "" || a.For != "" || a.Since != nil {
+		if a.Page != "" || a.Since != nil {
 			return 0, fmt.Errorf("composition supports global or folder only")
 		}
 		folder := a.Folder
@@ -337,30 +336,15 @@ func run(args []string) (code int, err error) {
 	}
 	defer s.Close()
 	switch command {
-	case "search":
-		in := input.(*SearchInput)
-		m := &model.Client{Config: c}
-		r, e := retrieve.Search(s, m, c, in.Queries, in.Pages, in.Layer, in.Limit)
+	case "recall":
+		r, e := brief.Recall(s, &model.Client{Config: c}, c, *input.(*brief.RecallArgs))
 		if e != nil {
 			return 0, e
 		}
 		if machine {
 			return 0, print(r)
 		}
-		for _, h := range r.Hits {
-			mark := ""
-			if h.Body {
-				mark = "+"
-			}
-			fmt.Printf("%s [%d%s] %s", h.ID, h.Bucket, mark, h.Line)
-			if h.Kind == "observation" {
-				fmt.Printf(" (%d)", h.Sources)
-			}
-			fmt.Println()
-		}
-		if r.More > 0 {
-			fmt.Printf("+%d more\n", r.More)
-		}
+		fmt.Println(r.Text)
 		fmt.Fprintf(os.Stderr, "cost_usd=%.8f\n", r.Cost)
 		return 0, nil
 	case "brief":

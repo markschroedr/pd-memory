@@ -13,12 +13,6 @@ import (
 	"github.com/markschroedr/pd-memory/internal/model"
 )
 
-type SearchInput struct {
-	Queries []string `json:"queries"`
-	Pages   []string `json:"pages,omitempty"`
-	Layer   string   `json:"layer,omitempty" jsonschema:"enum=observations,enum=chunks,enum=both"`
-	Limit   int      `json:"limit,omitempty"`
-}
 type OpenInput struct {
 	ID       string `json:"id" cli:"pos"`
 	History  bool   `json:"history,omitempty"`
@@ -98,8 +92,8 @@ type Definition struct {
 
 func definitions() []Definition {
 	return []Definition{
-		{Name: "search", Description: "Find observations and source chunks with hybrid retrieval. Supply query facets. Search whenever prior knowledge could change your work. When the person's circumstances could matter, consider also exploring related facts the request itself does not mention.", New: func() any { return new(SearchInput) }},
-		{Name: "brief", Description: "Read a standing, page, folder, situational, or since brief. Plain reads never generate text. compose regenerates the current-state scope.", New: func() any { return new(brief.Args) }},
+		{Name: "recall", Description: "Recall memory for a request or topic: observations grouped by page, then source passages, within a token budget. Pass for with the request in plain words, queries with short facets, or both. Recall whenever prior knowledge could change your work, and again when the conversation turns to a new topic. Observations already in the standing brief are listed by id only. When the person's circumstances could matter, consider also recalling related facts the request itself does not mention.", New: func() any { return new(brief.RecallArgs) }},
+		{Name: "brief", Description: "Read the standing, folder, page, or since brief. Plain reads never generate text. compose regenerates the current-state scope.", New: func() any { return new(brief.Args) }},
 		{Name: "open", Description: "Open a page, observation, source, chunk, or timeline view. history shows contributions and replacements; full includes raw source text.", New: func() any { return new(OpenInput) }},
 		{Name: "browse", Description: "Browse pages, page observations, or history headlines with pagination. No model calls.", New: func() any { return new(BrowseInput) }},
 		{Name: "note", Description: "Append a direct observation with user or agent authority. Returns queued unless wait is set.", New: func() any { return new(NoteInput) }},

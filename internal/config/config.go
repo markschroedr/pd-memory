@@ -57,9 +57,8 @@ type Config struct {
 		ExtractWindowTokens int `toml:"extract_window_tokens"`
 	} `toml:"chunk"`
 	Search struct {
-		DefaultLimit int `toml:"default_limit"`
-		MaxLimit     int `toml:"max_limit"`
-		RRFK         int `toml:"rrf_k"`
+		MaxLimit int `toml:"max_limit"`
+		RRFK     int `toml:"rrf_k"`
 	} `toml:"search"`
 	Brief struct {
 		Budget                   int     `toml:"budget"`
@@ -201,13 +200,13 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("missing %s", name)
 		}
 	}
-	for name, value := range map[string]int{"openai.timeout_ms": c.OpenAI.TimeoutMS, "embeddings.timeout_ms": c.Embeddings.TimeoutMS, "embeddings.dimension": c.Embeddings.Dimension, "ingest.matches_per_candidate": c.Ingest.MatchesPerCandidate, "ingest.extract_concurrency": c.Ingest.ExtractConcurrency, "chunk.target_tokens": c.Chunk.TargetTokens, "chunk.single_chunk_tokens": c.Chunk.SingleChunkTokens, "chunk.extract_window_tokens": c.Chunk.ExtractWindowTokens, "search.default_limit": c.Search.DefaultLimit, "search.max_limit": c.Search.MaxLimit, "search.rrf_k": c.Search.RRFK, "brief.per_page_cap": c.Brief.PerPageCap, "brief.next_cap": c.Brief.NextCap, "brief.project_affinity_exponent": c.Brief.ProjectAffinityExponent, "brief.directory_min_observations": c.Brief.DirectoryMinObservations, "brief.compose_input_factor": c.Brief.ComposeInputFactor, "timeline.history_budget": c.Timeline.HistoryBudget, "timeline.recent_budget": c.Timeline.RecentBudget, "timeline.open_budget": c.Timeline.OpenBudget, "compose.min_changes": c.Compose.MinChanges} {
+	for name, value := range map[string]int{"openai.timeout_ms": c.OpenAI.TimeoutMS, "embeddings.timeout_ms": c.Embeddings.TimeoutMS, "embeddings.dimension": c.Embeddings.Dimension, "ingest.matches_per_candidate": c.Ingest.MatchesPerCandidate, "ingest.extract_concurrency": c.Ingest.ExtractConcurrency, "chunk.target_tokens": c.Chunk.TargetTokens, "chunk.single_chunk_tokens": c.Chunk.SingleChunkTokens, "chunk.extract_window_tokens": c.Chunk.ExtractWindowTokens, "search.max_limit": c.Search.MaxLimit, "search.rrf_k": c.Search.RRFK, "brief.per_page_cap": c.Brief.PerPageCap, "brief.next_cap": c.Brief.NextCap, "brief.project_affinity_exponent": c.Brief.ProjectAffinityExponent, "brief.directory_min_observations": c.Brief.DirectoryMinObservations, "brief.compose_input_factor": c.Brief.ComposeInputFactor, "timeline.history_budget": c.Timeline.HistoryBudget, "timeline.recent_budget": c.Timeline.RecentBudget, "timeline.open_budget": c.Timeline.OpenBudget, "compose.min_changes": c.Compose.MinChanges} {
 		if value < 1 {
 			return nil, fmt.Errorf("invalid %s", name)
 		}
 	}
-	if c.Brief.Budget < 200 || c.Search.DefaultLimit > c.Search.MaxLimit {
-		return nil, fmt.Errorf("invalid budget or limits")
+	if c.Brief.Budget < 200 {
+		return nil, fmt.Errorf("brief budget must be at least 200")
 	}
 	for _, v := range []float64{c.Brief.SpineShare, c.Brief.DirectoryShare, c.Buckets.Three, c.Buckets.Two} {
 		if v < 0 || v > 1 || math.IsNaN(v) {

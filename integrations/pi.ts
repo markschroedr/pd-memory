@@ -26,6 +26,7 @@ type PiMemoryConfig = {
   capture_mode?: "daily" | "live";
   capture_after?: string;
   timeout_ms?: number;
+  situational_budget?: number;
 };
 
 const CONFIG_ENV = "PD_MEMORY_PI_CONFIG";
@@ -37,16 +38,22 @@ export default async function pdMemory(pi: PiApi): Promise<void> {
   const environment = childEnvironment(settings.credentials);
   const client = new MemoryClient({ ...settings, env: environment, timeout_ms: settings.timeout_ms ?? 3_600_000 });
   await registerTools(pi, client);
-  let briefedSession: string | null = null;
-
-  pi.on("before_agent_start", async (_event, context) => {
-    const session = context.sessionManager.getSessionId();
-    if (briefedSession === session) return;
+  // The first prompt gets the standing brief plus a recall for that prompt; a failed standing brief retries next prompt.
+  // The session itself records the injection, so a resumed session in a new process is not briefed twice.
+  pi.on("before_agent_start", async (event, context) => {
+    if (context.sessionManager.getBranch().some((entry) => entry?.type === "custom_message" && entry.customType === "pd-memory-brief")) return;
+    const folder = canonical(context.sessionManager.getCwd());
     try {
-      const result = await client.call("brief", { folder: canonical(context.sessionManager.getCwd()) });
-      if (!result?.text?.trim()) return;
-      briefedSession = session;
-      return { message: { customType: "pd-memory-brief", content: `Standing memory brief\n\n${result.text}`, display: false } };
+      const standing = await client.call("brief", { folder });
+      let content = `Standing memory brief\n\n${standing.text}`;
+      try {
+        const recalled = await client.call("recall", { for: event.prompt, folder, budget: settings.situational_budget ?? 1500 });
+        content += `\n\nRecalled for your first request\n\n${recalled.text}`;
+      } catch (error) {
+        context.ui.notify(`pd-memory recall unavailable: ${message(error)}`, "warning");
+      }
+      content += "\n\nWhen the conversation turns to a new topic or task, consider calling memory_recall for it.";
+      return { message: { customType: "pd-memory-brief", content, display: false } };
     } catch (error) {
       context.ui.notify(`pd-memory brief unavailable: ${message(error)}`, "warning");
     }
@@ -70,16 +77,16 @@ export default async function pdMemory(pi: PiApi): Promise<void> {
 async function registerTools(pi: PiApi, client: MemoryClient): Promise<void> {
   const catalog = await client.call("catalog", {});
   for (const definition of catalog.commands) {
-    if (!["search", "brief", "open", "browse", "note", "edit", "focus", "forget"].includes(definition.name)) continue;
+    if (!["recall", "brief", "open", "browse", "note", "edit", "focus", "forget"].includes(definition.name)) continue;
     pi.registerTool({
       name: `memory_${definition.name}`,
       label: `Memory ${definition.name[0]!.toUpperCase()}${definition.name.slice(1)}`,
       description: definition.description,
       promptSnippet: definition.description,
-      parameters: ["brief", "focus"].includes(definition.name) ? withoutFolder(definition.inputSchema) : definition.inputSchema,
+      parameters: ["recall", "brief", "focus"].includes(definition.name) ? withoutFolder(definition.inputSchema) : definition.inputSchema,
       async execute(_id: string, params: any, signal: AbortSignal, _onUpdate: unknown, context: PiContext) {
         const result = await invokeCommand(client, definition.name as Command, params, signal, context);
-        const text = definition.name === "brief" && "text" in result ? result.text : definition.name === "search" ? formatSearch(result) : JSON.stringify(result, null, 2);
+        const text = "text" in result && ["recall", "brief"].includes(definition.name) ? result.text : JSON.stringify(result, null, 2);
         return { content: [{ type: "text", text }], details: result };
       },
     });
@@ -88,7 +95,7 @@ async function registerTools(pi: PiApi, client: MemoryClient): Promise<void> {
 
 async function invokeCommand<C extends Command>(client: MemoryClient, name: C, params: Commands[C]["input"], signal: AbortSignal, context: PiContext): Promise<Commands[C]["result"]> {
   const input: any = { ...params };
-  if (name === "focus" || (name === "brief" && !input.page && !input.for && input.since === undefined)) {
+  if (name === "focus" || name === "recall" || (name === "brief" && !input.page && input.since === undefined)) {
     input.folder = canonical(context.sessionManager.getCwd());
   }
   return client.call(name, input, { signal });
@@ -134,6 +141,9 @@ function readSettings(path: string): PiMemoryConfig {
   if (raw.capture_mode !== undefined && raw.capture_mode !== "daily" && raw.capture_mode !== "live") {
     throw new Error(`${CONFIG_ENV} capture_mode must be daily or live`);
   }
+  if (raw.situational_budget !== undefined && (!Number.isSafeInteger(raw.situational_budget) || raw.situational_budget < 200)) {
+    throw new Error(`${CONFIG_ENV} situational_budget must be an integer of at least 200`);
+  }
   if (raw.capture_after !== undefined && Number.isNaN(Date.parse(raw.capture_after))) throw new Error(`${CONFIG_ENV} capture_after must be an ISO timestamp`);
   return { ...raw, capture_mode: raw.capture_mode ?? "daily", binary: raw.binary, config: resolve(raw.config),
     credentials: raw.credentials ? resolve(raw.credentials) : undefined,
@@ -171,10 +181,6 @@ function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.filter((item: any) => item?.type === "text" && typeof item.text === "string").map((item: any) => item.text).join("\n");
-}
-function formatSearch(result: any): string {
-  const lines = (result.hits ?? []).map((hit: any) => hit.kind === "observation" ? `${hit.id} [${hit.bucket}${hit.body ? "+" : ""}] ${hit.line} (${hit.sources})` : `${hit.id} [${hit.bucket}] ${hit.line}`);
-  if (result.more) lines.push(`+${result.more} more`); return lines.join("\n");
 }
 function inside(root: string, path: string): boolean { const child = relative(root, path); return child === "" || (!child.startsWith("..") && !isAbsolute(child)); }
 function canonical(path: string): string { try { return realpathSync(resolve(path)); } catch { return resolve(path); } }

@@ -13,7 +13,6 @@ import (
 	inputlog "github.com/markschroedr/pd-memory/internal/log"
 	"github.com/markschroedr/pd-memory/internal/memory"
 	"github.com/markschroedr/pd-memory/internal/model"
-	"github.com/markschroedr/pd-memory/internal/retrieve"
 	"github.com/markschroedr/pd-memory/internal/view"
 )
 
@@ -183,9 +182,7 @@ type DoctorResult struct {
 func resultSchema(name string) map[string]any {
 	var output any
 	switch name {
-	case "search":
-		output = new(retrieve.Result)
-	case "brief":
+	case "recall", "brief":
 		output = new(brief.Result)
 	case "browse":
 		output = new(BrowseResult)

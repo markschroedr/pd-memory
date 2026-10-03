@@ -19,14 +19,12 @@ import (
 )
 
 type Args struct {
-	Page          string   `json:"page,omitempty"`
-	Folder        string   `json:"folder,omitempty"`
-	IncludeGlobal *bool    `json:"include_global,omitempty"`
-	For           string   `json:"for,omitempty"`
-	Queries       []string `json:"queries,omitempty"`
-	Budget        int      `json:"budget,omitempty"`
-	Since         *int64   `json:"since,omitempty"`
-	Compose       bool     `json:"compose,omitempty"`
+	Page          string `json:"page,omitempty"`
+	Folder        string `json:"folder,omitempty"`
+	IncludeGlobal *bool  `json:"include_global,omitempty"`
+	Budget        int    `json:"budget,omitempty"`
+	Since         *int64 `json:"since,omitempty"`
+	Compose       bool   `json:"compose,omitempty"`
 }
 type Result struct {
 	Text      string   `json:"text"`
@@ -358,44 +356,6 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 		r.Tokens = b.Tokens
 		return r, nil
 	}
-	if args.For != "" {
-		queries := append([]string{args.For}, args.Queries...)
-		result, e := retrieve.Search(s, m, c, queries, nil, "observations", c.Search.DefaultLimit)
-		if e != nil {
-			return Result{}, e
-		}
-		// Source passages catch facts that never became observations; they fill the remaining budget.
-		passages, e := retrieve.Search(s, m, c, queries, nil, "chunks", c.Search.DefaultLimit)
-		if e != nil {
-			return Result{}, e
-		}
-		rs := []ranked{}
-		for _, h := range result.Hits {
-			if h.Observation != nil {
-				rs = append(rs, ranked{*h.Observation, h.Score})
-			}
-		}
-		r, e := assemble(s, c, rs, budget, "# For: "+args.For, len(rs), nil, false, map[string]bool{})
-		if e != nil {
-			return Result{}, e
-		}
-		b := Builder{Text: r.Text, Tokens: r.Tokens, Budget: budget}
-		header := false
-		for _, h := range passages.Hits {
-			line := "\n- " + h.ID + " " + h.Line
-			if !header {
-				line = "\n\n## Source passages" + line
-			}
-			if !b.Add(line) {
-				r.Truncated = true
-				break
-			}
-			header = true
-		}
-		r.Text, r.Tokens = b.Text, b.Tokens
-		r.Cost = result.Cost + passages.Cost
-		return r, nil
-	}
 	if args.Page != "" {
 		desc, e := s.Descendants(args.Page)
 		if e != nil {
@@ -468,6 +428,80 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 		return global, nil
 	}
 	return global(s, c, all, budget, map[string]bool{})
+}
+
+// RecallArgs asks for memory about one request or topic. Folder names the host's standing brief.
+type RecallArgs struct {
+	For     string   `json:"for,omitempty"`
+	Queries []string `json:"queries,omitempty"`
+	Pages   []string `json:"pages,omitempty"`
+	Budget  int      `json:"budget,omitempty"`
+	Folder  string   `json:"folder,omitempty"`
+}
+
+var cited = regexp.MustCompile(`\b[0-9a-f]{8}\b`)
+
+// Recall ranks observations and source passages for a request within a budget. Observations the
+// standing brief already shows are named by id only, so a recall next to that brief adds new facts.
+func Recall(s *memory.Store, m *model.Client, c *config.Config, args RecallArgs) (Result, error) {
+	queries := args.Queries
+	if strings.TrimSpace(args.For) != "" {
+		queries = append([]string{args.For}, queries...)
+	}
+	if len(queries) == 0 {
+		return Result{}, fmt.Errorf("recall needs for or queries")
+	}
+	budget := args.Budget
+	if budget == 0 {
+		budget = 1500
+	}
+	if budget < 200 {
+		return Result{}, fmt.Errorf("recall budget must be at least 200")
+	}
+	standing, e := Run(s, m, c, Args{Folder: args.Folder})
+	if e != nil {
+		return Result{}, e
+	}
+	shown := map[string]bool{}
+	for _, id := range cited.FindAllString(standing.Text, -1) {
+		shown[id] = true
+	}
+	hits, e := retrieve.Search(s, m, c, queries, args.Pages)
+	if e != nil {
+		return Result{}, e
+	}
+	rs, already, passages := []ranked{}, []string{}, []retrieve.Hit{}
+	for _, h := range hits.Hits {
+		switch {
+		case h.Observation == nil:
+			passages = append(passages, h)
+		case shown[h.ID]:
+			already = append(already, h.ID)
+		default:
+			rs = append(rs, ranked{*h.Observation, h.Score})
+		}
+	}
+	r, e := assemble(s, c, rs, budget, "# Recall: "+strings.Join(queries, "; "), len(rs), nil, false, map[string]bool{})
+	if e != nil {
+		return Result{}, e
+	}
+	b := Builder{Text: r.Text, Tokens: r.Tokens, Budget: budget}
+	if len(already) > 0 {
+		b.Add("\n\nAlso matched, already in the standing brief: " + strings.Join(already, ", "))
+	}
+	// Source passages catch facts that never became observations; they fill the remaining budget.
+	for i, h := range passages {
+		line := "\n- " + h.ID + " " + h.Line
+		if i == 0 {
+			line = "\n\n## Source passages" + line
+		}
+		if !b.Add(line) {
+			r.Truncated = true
+			break
+		}
+	}
+	r.Text, r.Tokens, r.Cost = b.Text, b.Tokens, hits.Cost
+	return r, nil
 }
 func global(s *memory.Store, c *config.Config, all []ranked, budget int, excluded map[string]bool) (Result, error) {
 	v, e := stored(s, c, "global", excluded)

@@ -60,7 +60,6 @@ single_chunk_tokens = 600
 extract_window_tokens = 150000
 
 [search]
-default_limit = 10
 max_limit = 40
 rrf_k = 60
 

@@ -216,14 +216,13 @@ type Hit struct {
 	Observation *memory.Observation `json:"-"`
 }
 type Result struct {
-	Hits []Hit    `json:"hits"`
-	More int      `json:"more"`
-	Next []string `json:"next"`
-	Cost float64  `json:"cost_usd"`
+	Hits []Hit
+	Cost float64
 }
 
-func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages []string, layer string, limit int) (Result, error) {
-	out := Result{Hits: []Hit{}, Next: []string{}}
+// Search ranks observations and source chunks together and returns the best max_limit hits.
+func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages []string) (Result, error) {
+	out := Result{Hits: []Hit{}}
 	if len(queries) == 0 {
 		return out, fmt.Errorf("queries required")
 	}
@@ -232,18 +231,6 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 			return out, fmt.Errorf("empty query")
 		}
 	}
-	if layer == "" {
-		layer = "both"
-	}
-	if !config.Contains([]string{"both", "observations", "chunks"}, layer) {
-		return out, fmt.Errorf("invalid layer")
-	}
-	if limit == 0 {
-		limit = c.Search.DefaultLimit
-	}
-	if limit < 1 || limit > c.Search.MaxLimit {
-		return out, fmt.Errorf("invalid search limit")
-	}
 	before := m.Cost
 	vectors, e := m.Embed(queries)
 	if e != nil {
@@ -251,9 +238,6 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 	}
 	scores := map[string]float64{}
 	for _, kind := range []string{"observations", "chunks"} {
-		if layer != "both" && layer != kind {
-			continue
-		}
 		semantic, e := Nearest(s, vectors, c, kind, pages, 100)
 		if e != nil {
 			return out, e
@@ -304,7 +288,7 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 				}
 			}
 		}
-		if named && layer != "chunks" {
+		if named {
 			for _, o := range rows {
 				if allowed(o) && config.Contains(o.Pages, p.Slug) {
 					scores[o.ID] += 1 / float64(c.Search.RRFK+1)
@@ -317,9 +301,6 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 		max = math.Max(max, v)
 	}
 	for _, o := range rows {
-		if layer == "chunks" {
-			break
-		}
 		r := scores[o.ID]
 		if r == 0 || !allowed(o) {
 			continue
@@ -332,30 +313,28 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 		copy := o
 		out.Hits = append(out.Hits, Hit{o.ID, "observation", c.Bucket(score), o.Line, o.Body != nil, len(o.Sources), score, &copy})
 	}
-	if layer != "observations" {
-		for id, r := range scores {
-			if !strings.HasPrefix(id, "src:") || !strings.Contains(id, "/") {
-				continue
-			}
-			rs, e := s.Query(`SELECT c.context,CASE WHEN l.kind='source' THEN json_extract(l.payload,'$.kind') WHEN l.actor='user' THEN 'note_user' ELSE 'note_agent' END source_kind,coalesce(max(json_extract(o.value,'$.weight')),0.3) weight,coalesce(max(json_extract(o.value,'$.confidence')),0.5) confidence,count(o.id) sources FROM chunks c JOIN inputlog.entries l ON l.seq=c.source_seq LEFT JOIN evidence ev ON ev.chunk=c.id LEFT JOIN observations o ON o.id=ev.observation AND o.replaced_by IS NULL AND o.forgotten IS NULL WHERE c.id=? GROUP BY c.id`, id)
-			if e != nil {
-				return out, e
-			}
-			if len(rs) == 0 {
-				continue
-			}
-			v := config.Variables()
-			v["relevance"] = r / max
-			v["weight"] = number(rs[0]["weight"])
-			v["confidence"] = number(rs[0]["confidence"])
-			v["sources"] = number(rs[0]["sources"])
-			v["source_prior"] = c.SourcePriors[rs[0]["source_kind"].(string)]
-			score, e := c.Evaluate(c.CallSites.SearchChunk, v)
-			if e != nil {
-				return out, e
-			}
-			out.Hits = append(out.Hits, Hit{ID: id, Kind: "chunk", Bucket: c.Bucket(score), Line: rs[0]["context"].(string), Score: score})
+	for id, r := range scores {
+		if !strings.HasPrefix(id, "src:") || !strings.Contains(id, "/") {
+			continue
 		}
+		rs, e := s.Query(`SELECT c.context,CASE WHEN l.kind='source' THEN json_extract(l.payload,'$.kind') WHEN l.actor='user' THEN 'note_user' ELSE 'note_agent' END source_kind,coalesce(max(json_extract(o.value,'$.weight')),0.3) weight,coalesce(max(json_extract(o.value,'$.confidence')),0.5) confidence,count(o.id) sources FROM chunks c JOIN inputlog.entries l ON l.seq=c.source_seq LEFT JOIN evidence ev ON ev.chunk=c.id LEFT JOIN observations o ON o.id=ev.observation AND o.replaced_by IS NULL AND o.forgotten IS NULL WHERE c.id=? GROUP BY c.id`, id)
+		if e != nil {
+			return out, e
+		}
+		if len(rs) == 0 {
+			continue
+		}
+		v := config.Variables()
+		v["relevance"] = r / max
+		v["weight"] = number(rs[0]["weight"])
+		v["confidence"] = number(rs[0]["confidence"])
+		v["sources"] = number(rs[0]["sources"])
+		v["source_prior"] = c.SourcePriors[rs[0]["source_kind"].(string)]
+		score, e := c.Evaluate(c.CallSites.SearchChunk, v)
+		if e != nil {
+			return out, e
+		}
+		out.Hits = append(out.Hits, Hit{ID: id, Kind: "chunk", Bucket: c.Bucket(score), Line: rs[0]["context"].(string), Score: score})
 	}
 	sort.Slice(out.Hits, func(i, j int) bool {
 		if out.Hits[i].Score == out.Hits[j].Score {
@@ -363,13 +342,7 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 		}
 		return out.Hits[i].Score > out.Hits[j].Score
 	})
-	if len(out.Hits) > limit {
-		out.More = len(out.Hits) - limit
-		out.Hits = out.Hits[:limit]
-	}
-	for _, h := range out.Hits {
-		out.Next = append(out.Next, h.ID)
-	}
+	out.Hits = out.Hits[:min(len(out.Hits), c.Search.MaxLimit)]
 	out.Cost = m.Cost - before
 	return out, nil
 }
