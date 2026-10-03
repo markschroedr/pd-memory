@@ -285,12 +285,27 @@ func (w *Worker) foldOne(entry inputlog.Entry) error {
 	previous := w.Seq
 	w.Seq = entry.Seq
 	defer func() { w.Seq = previous }()
-	if e := w.Memory.Tx(func(c *sql.Conn) error {
-		return memory.Exec(c, "INSERT INTO fold_state VALUES(?,'failed',1,NULL) ON CONFLICT(seq) DO UPDATE SET attempts=attempts+1,error=NULL", entry.Seq)
-	}); e != nil {
-		return e
-	}
-	if e := w.entry(entry); e != nil {
+	// Model output occasionally fails validation; rerun the entry up to its third attempt before recording
+	// the failure. Cached chunks and extraction make a rerun repeat only the failed step.
+	for {
+		if e := w.Memory.Tx(func(c *sql.Conn) error {
+			return memory.Exec(c, "INSERT INTO fold_state VALUES(?,'failed',1,NULL) ON CONFLICT(seq) DO UPDATE SET attempts=attempts+1,error=NULL", entry.Seq)
+		}); e != nil {
+			return e
+		}
+		e := w.entry(entry)
+		if e == nil {
+			w.out.Processed = append(w.out.Processed, entry.Seq)
+			return nil
+		}
+		var attempts int
+		if err := w.Memory.DB.QueryRow("SELECT attempts FROM fold_state WHERE seq=?", entry.Seq).Scan(&attempts); err != nil {
+			return err
+		}
+		if attempts < 3 {
+			fmt.Fprintf(os.Stderr, "Fold %d attempt %d failed, retrying: %v\n", entry.Seq, attempts, e)
+			continue
+		}
 		if err := w.Memory.Tx(func(c *sql.Conn) error {
 			return memory.Exec(c, "UPDATE fold_state SET error=? WHERE seq=?", e.Error(), entry.Seq)
 		}); err != nil {
@@ -298,10 +313,8 @@ func (w *Worker) foldOne(entry inputlog.Entry) error {
 		}
 		fmt.Fprintf(os.Stderr, "Fold %d failed: %v\n", entry.Seq, e)
 		w.out.Failed = append(w.out.Failed, entry.Seq)
-	} else {
-		w.out.Processed = append(w.out.Processed, entry.Seq)
+		return nil
 	}
-	return nil
 }
 func (w *Worker) pendingStructured() error {
 	for {
