@@ -31,6 +31,23 @@ It is one Go executable and two SQLite files. Hosts call it as a CLI, and TypeSc
 
 This is an experimental personal project that I use daily with my own agents. The earlier TypeScript engine remains at tag `v0.1-typescript`.
 
+## An informal benchmark result
+
+[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests the case this design is built for. A user mentions a personal fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. I ran it myself on all 125 tasks with the benchmark's answer model, judge, and prompts. These are my own unverified numbers, not an official leaderboard entry.
+
+| System | Direct recall | Target recall | Application |
+| --- | --- | --- | --- |
+| pd-memory, brief and agent-driven search | 86.4% | 80.8% | **72.8%** |
+| pd-memory, brief and retrieval for the question | 93.6% | 83.2% | **69.6%** |
+| Naive RAG (text-embedding-3-large) | 97.6% | 6.4% | 16.0% |
+| MemoryOS | 96.8% | 7.2% | 14.4% |
+| A-Mem | 100.0% | 12.0% | 9.6% |
+| HippoRAG 2 | 93.6% | 0.8% | 8.8% |
+| Mem0 | 76.8% | 6.4% | 6.4% |
+| Fact already in context (control) | | 100.0% | 84.0% |
+
+Other rows are the paper's results from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/), each with its best reported embedding. pd-memory used `gpt-6-luna` to build memory and `gpt-5-mini` to answer and judge, and its context per question was about 1.3k to 2.1k tokens. One task failed during ingestion and counts as a miss. Each task builds its own small memory, so the brief never had to leave anything out; larger memories are the harder case and not measured here.
+
 ## Setup
 
 ```sh
