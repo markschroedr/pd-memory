@@ -79,7 +79,7 @@ pd-memory import sessions --pi /path/to/pi/sessions --wait
 
 The importer also accepts `--claude-code` and `--codex` paths. It reads completed exchanges, skips subagents, and remembers message ids so the next import only captures new messages.
 
-The [Pi extension](integrations/pi.ts) adds the brief at session start and memory tools. Its settings live in `~/.config/pd-memory/pi.json`:
+The [Pi extension](integrations/pi.ts) adds memory tools. At the first prompt of a session it adds the standing brief and a recall for that prompt; `situational_budget` sets the recall's token budget (default 1500). Its settings live in `~/.config/pd-memory/pi.json`:
 
 ```json
 {"binary":"pd-memory","config":"/absolute/path/to/pd-memory.toml"}
