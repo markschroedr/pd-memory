@@ -521,7 +521,18 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 			return Result{}, e
 		}
 	}
-	parts := []string{"# Memory"}
+	// Readers need memory's own present to interpret dated and stable-form facts, such as a birth year.
+	header := "# Memory"
+	latest := ""
+	for _, o := range all {
+		if o.Happened != nil && *o.Happened > latest {
+			latest = *o.Happened
+		}
+	}
+	if latest != "" {
+		header += " (latest entry " + latest[:10] + ")"
+	}
+	parts := []string{header}
 	for _, txt := range []string{history, standing.Text, recent} {
 		if strings.TrimSpace(txt) != "" {
 			parts = append(parts, strings.TrimSpace(txt))
