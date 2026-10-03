@@ -359,7 +359,13 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 		return r, nil
 	}
 	if args.For != "" {
-		result, e := retrieve.Search(s, m, c, append([]string{args.For}, args.Queries...), nil, "observations", c.Search.DefaultLimit)
+		queries := append([]string{args.For}, args.Queries...)
+		result, e := retrieve.Search(s, m, c, queries, nil, "observations", c.Search.DefaultLimit)
+		if e != nil {
+			return Result{}, e
+		}
+		// Source passages catch facts that never became observations; they fill the remaining budget.
+		passages, e := retrieve.Search(s, m, c, queries, nil, "chunks", c.Search.DefaultLimit)
 		if e != nil {
 			return Result{}, e
 		}
@@ -370,8 +376,25 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 			}
 		}
 		r, e := assemble(s, c, rs, budget, "# For: "+args.For, len(rs), nil, false, map[string]bool{})
-		r.Cost = result.Cost
-		return r, e
+		if e != nil {
+			return Result{}, e
+		}
+		b := Builder{Text: r.Text, Tokens: r.Tokens, Budget: budget}
+		header := false
+		for _, h := range passages.Hits {
+			line := "\n- " + h.ID + " " + h.Line
+			if !header {
+				line = "\n\n## Source passages" + line
+			}
+			if !b.Add(line) {
+				r.Truncated = true
+				break
+			}
+			header = true
+		}
+		r.Text, r.Tokens = b.Text, b.Tokens
+		r.Cost = result.Cost + passages.Cost
+		return r, nil
 	}
 	if args.Page != "" {
 		desc, e := s.Descendants(args.Page)
