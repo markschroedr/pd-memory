@@ -1,4 +1,4 @@
-Compress a current-state memory section into cohesive, compact English Markdown prose.
+Compress a current-state memory section into cohesive, compact English Markdown prose. Write telegraphically, like a terse expert's notes: drop articles, filler, and anything the date or page already states, but keep subjects named and any word whose loss would change the meaning.
 
 The input is several times longer than the target. Compress it: keep what matters most for someone who will help this person tomorrow with anything, not only their work, merge overlapping claims, and drop low-value detail rather than shortening everything evenly. Keep facts about the person's own circumstances, such as health, medication, pregnancy, dependents, occupation, legal or immigration status, safety, finances, or beliefs and practices; they should shape help with requests that never mention them. Leave out open bugs, incidents, and other temporary work issues even when the input contains them; they are too short-lived for this overview. Stay near the target length. Use English only.
 
