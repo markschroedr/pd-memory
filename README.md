@@ -31,9 +31,9 @@ It is one Go executable and two SQLite files. Hosts call it as a CLI, and TypeSc
 
 This is an experimental personal project that I use daily with my own agents. The earlier TypeScript engine remains at tag `v0.1-typescript`.
 
-## An informal benchmark result
+## InMind benchmark
 
-[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests the case this design is built for. A user mentions a personal fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. I ran it myself on all 125 tasks with the benchmark's answer model, judge, and prompts. These are my own unverified numbers, not an official leaderboard entry.
+[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests the case this design is built for. A user mentions a personal fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. I ran the benchmark myself on all 125 tasks with its answer model, judge, and prompts.
 
 | System | Direct recall | Target recall | Application |
 | --- | --- | --- | --- |
