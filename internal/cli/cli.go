@@ -25,7 +25,7 @@ const Help = `pd-memory — progressive-disclosure memory
 Usage: pd-memory COMMAND [options] [--config FILE] [--json]
 
 Agent commands:
-  recall [--for TEXT] [--query FACET] [--page PAGE] [--budget N]
+  recall --query TEXT [--query FACET] [--page PAGE] [--budget N]
   brief [--page PAGE | --folder PATH | --since SEQ] [--budget N] [--compose]
   open ID [--history] [--full]
   browse [--view pages|page|history] [--id PAGE] [--period month] [--limit N] [--offset N]

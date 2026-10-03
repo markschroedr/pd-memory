@@ -48,7 +48,7 @@ Generation uses either OpenAI directly with Flex, or OpenRouter with zero-retent
 ```sh
 pd-memory ingest --path notes.txt --kind document --label Notes --wait
 pd-memory brief
-pd-memory recall --for "architecture decisions"
+pd-memory recall --query "architecture decisions"
 pd-memory open ID --history
 pd-memory note --line "A durable observation." --page root --actor user --wait
 pd-memory help

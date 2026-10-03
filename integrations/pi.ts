@@ -47,7 +47,7 @@ export default async function pdMemory(pi: PiApi): Promise<void> {
       const standing = await client.call("brief", { folder });
       let content = `Standing memory brief\n\n${standing.text}`;
       try {
-        const recalled = await client.call("recall", { for: event.prompt, folder, budget: settings.situational_budget ?? 1500 });
+        const recalled = await client.call("recall", { queries: [event.prompt], folder, budget: settings.situational_budget ?? 1500 });
         content += `\n\nRecalled for your first request\n\n${recalled.text}`;
       } catch (error) {
         context.ui.notify(`pd-memory recall unavailable: ${message(error)}`, "warning");

@@ -432,8 +432,7 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 
 // RecallArgs asks for memory about one request or topic. Folder names the host's standing brief.
 type RecallArgs struct {
-	For     string   `json:"for,omitempty"`
-	Queries []string `json:"queries,omitempty"`
+	Queries []string `json:"queries"`
 	Pages   []string `json:"pages,omitempty"`
 	Budget  int      `json:"budget,omitempty"`
 	Folder  string   `json:"folder,omitempty"`
@@ -445,11 +444,8 @@ var cited = regexp.MustCompile(`\b[0-9a-f]{8}\b`)
 // standing brief already shows are named by id only, so a recall next to that brief adds new facts.
 func Recall(s *memory.Store, m *model.Client, c *config.Config, args RecallArgs) (Result, error) {
 	queries := args.Queries
-	if strings.TrimSpace(args.For) != "" {
-		queries = append([]string{args.For}, queries...)
-	}
 	if len(queries) == 0 {
-		return Result{}, fmt.Errorf("recall needs for or queries")
+		return Result{}, fmt.Errorf("recall needs at least one query")
 	}
 	budget := args.Budget
 	if budget == 0 {
