@@ -12,7 +12,7 @@ Kind: fact for a state of the world; question for something explicitly unresolve
 
 Time: happened is when the claim's event occurred. Use the source date unless the text dates the claim itself. Null only when neither is known.
 
-Scores, 0 to 1: confidence is how firmly the source establishes the claim (0.9 stated as fact by the responsible person, 0.6 plausible or partly agreed, 0.3 speculation or one-sided proposal). weight is how much this should shape future decisions, advice, or help for the person (0.9 materially changes future decisions or advice, 0.5 useful lasting context, 0.2 peripheral durable detail). Durability is the relevance half-life in days (1, 7, 30, 365), null for permanent; it is not a score.
+Scores, 0 to 1: confidence is how firmly the source establishes the claim (0.9 stated as fact by the responsible person, 0.6 plausible or partly agreed, 0.3 speculation or one-sided proposal). weight is how much this should shape future decisions, advice, or help for the person (0.9 materially changes future decisions or advice, 0.5 useful lasting context, 0.2 peripheral durable detail); a fact about the person's own circumstances that would change advice on unrelated requests rates 0.8 or more. Durability is the relevance half-life in days (1, 7, 30, 365), null for permanent, including stable circumstances such as a condition, a dependent, or a belief; it is not a score.
 
 Evidence: cite one or more shown chunk ids for every observation. Cite only chunks from this source that directly support the claim.
 
