@@ -481,7 +481,14 @@ func Recall(s *memory.Store, m *model.Client, c *config.Config, args RecallArgs)
 			rs = append(rs, ranked{*h.Observation, h.Score})
 		}
 	}
-	r, e := assemble(s, c, rs, budget, "# Recall: "+strings.Join(queries, "; "), len(rs), nil, false, map[string]bool{})
+	// Pages follow their best hit, so the most relevant subject leads and gets the larger share.
+	relevance := map[string]float64{}
+	for _, o := range rs {
+		for _, p := range o.Pages {
+			relevance[p] = math.Max(relevance[p], o.Rank)
+		}
+	}
+	r, e := assemble(s, c, rs, budget, "# Recall: "+strings.Join(queries, "; "), len(rs), relevance, false, map[string]bool{})
 	if e != nil {
 		return Result{}, e
 	}
