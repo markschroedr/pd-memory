@@ -61,7 +61,9 @@ type Config struct {
 		RRFK     int `toml:"rrf_k"`
 	} `toml:"search"`
 	Brief struct {
-		Budget                   int     `toml:"budget"`
+		GlobalBudget             int     `toml:"global_budget"`
+		ProjectBudget            int     `toml:"project_budget"`
+		RecallBudget             int     `toml:"recall_budget"`
 		SpineShare               float64 `toml:"spine_share"`
 		PageDecay                float64 `toml:"page_decay"`
 		NextCap                  int     `toml:"next_cap"`
@@ -127,7 +129,9 @@ func Load(path string) (*Config, error) {
 	c.Embeddings.Provider = "openrouter"
 	c.Ingest.MatchesPerCandidate = 5
 	c.Ingest.ExtractConcurrency = 4
-	c.Brief.Budget = 16000
+	c.Brief.GlobalBudget = 8000
+	c.Brief.ProjectBudget = 4000
+	c.Brief.RecallBudget = 1500
 	c.Brief.ProjectAffinityExponent = 4
 	c.Brief.DirectoryShare = .25
 	c.Brief.DirectoryMinObservations = 3
@@ -205,8 +209,10 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("invalid %s", name)
 		}
 	}
-	if c.Brief.Budget < 200 {
-		return nil, fmt.Errorf("brief budget must be at least 200")
+	for name, value := range map[string]int{"global_budget": c.Brief.GlobalBudget, "project_budget": c.Brief.ProjectBudget, "recall_budget": c.Brief.RecallBudget} {
+		if value < 200 {
+			return nil, fmt.Errorf("brief %s must be at least 200", name)
+		}
 	}
 	for _, v := range []float64{c.Brief.SpineShare, c.Brief.DirectoryShare, c.Buckets.Three, c.Buckets.Two} {
 		if v < 0 || v > 1 || math.IsNaN(v) {

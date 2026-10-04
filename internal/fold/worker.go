@@ -506,9 +506,9 @@ func Maintenance(c *config.Config, folder string, budget int, compose bool) (out
 		}
 		engine := &view.Engine{Store: w.Memory, Config: c, Model: w.Model}
 		if budget == 0 {
-			budget = c.Brief.Budget
+			budget = c.Brief.GlobalBudget
 			if folder != "" {
-				budget = 4000
+				budget = c.Brief.ProjectBudget
 			}
 		}
 		v, e := engine.Composition(folder, budget)

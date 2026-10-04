@@ -217,7 +217,7 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 		}
 		return order[a] < order[b]
 	})
-	current, _, err := brief.Current(e.Store, e.Config, "", e.Config.Brief.Budget)
+	current, _, err := brief.Current(e.Store, e.Config, "", e.Config.Brief.GlobalBudget)
 	if err != nil {
 		return out, err
 	}
@@ -371,10 +371,10 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 		}
 		for _, folder := range folders {
 			scope := "global"
-			target := e.Config.Brief.Budget
+			target := e.Config.Brief.GlobalBudget
 			if folder != "" {
 				scope = "project:" + folder
-				target = 4000
+				target = e.Config.Brief.ProjectBudget
 			}
 			v, exists := nodes[scope]
 			valid := false

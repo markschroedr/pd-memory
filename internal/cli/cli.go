@@ -318,7 +318,7 @@ func run(args []string) (code int, err error) {
 		}
 		budget := a.Budget
 		if folder != "" && budget != 0 {
-			budget /= 2
+			_, budget = brief.Budgets(c, budget)
 		}
 		out, e := fold.Maintenance(c, folder, budget, true)
 		if e != nil {

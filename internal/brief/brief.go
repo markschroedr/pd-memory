@@ -283,12 +283,27 @@ func stored(s *memory.Store, c *config.Config, scope string, exclude map[string]
 	}
 	return nil, nil
 }
+
+// Budgets returns the global and project parts of a folder brief. A requested total splits in the
+// configured ratio.
+func Budgets(c *config.Config, total int) (int, int) {
+	g, p := c.Brief.GlobalBudget, c.Brief.ProjectBudget
+	if total == 0 {
+		return g, p
+	}
+	g = total * g / (g + p)
+	return g, total - g
+}
+
 func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result, error) {
 	budget := args.Budget
 	if budget == 0 {
-		budget = c.Brief.Budget
+		budget = c.Brief.GlobalBudget
 		if args.Folder != "" {
-			budget = 8000
+			budget = c.Brief.GlobalBudget + c.Brief.ProjectBudget
+			if args.IncludeGlobal != nil && !*args.IncludeGlobal {
+				budget = c.Brief.ProjectBudget
+			}
 		}
 	}
 	if budget < 200 {
@@ -394,10 +409,22 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 			return Result{}, e
 		}
 		rs := projectRows(all, scores, hidden)
+		withGlobal := args.IncludeGlobal == nil || *args.IncludeGlobal
+		// The global part comes first so its composition stays intact; the project part then skips
+		// what the global part already shows.
+		var standing Result
 		shown := map[string]bool{}
 		projectBudget := budget
-		if args.IncludeGlobal == nil || *args.IncludeGlobal {
-			projectBudget = budget / 2
+		if withGlobal {
+			var globalBudget int
+			globalBudget, projectBudget = Budgets(c, budget)
+			standing, e = global(s, c, all, globalBudget, map[string]bool{})
+			if e != nil {
+				return Result{}, e
+			}
+			for _, id := range cited.FindAllString(standing.Text, -1) {
+				shown[id] = true
+			}
 		}
 		v, e := stored(s, c, "project:"+folder, map[string]bool{})
 		if e != nil {
@@ -406,30 +433,29 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 		var project Result
 		if v != nil {
 			project = Result{Text: "# Project: " + filepath.Base(folder) + "\n\n" + v.Text, Seq: seq, Tokens: Estimate(v.Text), Next: []string{}}
-			for _, id := range v.Citations {
-				shown[id] = true
-			}
 		} else {
-			project, e = assemble(s, c, rs, projectBudget, "# Project: "+filepath.Base(folder), 1, scores, false, shown)
+			unshown := []ranked{}
+			for _, o := range rs {
+				if !shown[o.ID] {
+					unshown = append(unshown, o)
+				}
+			}
+			project, e = assemble(s, c, unshown, projectBudget, "# Project: "+filepath.Base(folder), 1, scores, false, shown)
 			if e != nil {
 				return Result{}, e
 			}
 		}
-		if args.IncludeGlobal != nil && !*args.IncludeGlobal {
+		if !withGlobal {
 			return project, nil
 		}
-		global, e := global(s, c, all, budget-projectBudget, shown)
-		if e != nil {
-			return Result{}, e
+		standing.Text += "\n\n" + project.Text
+		standing.Tokens = Estimate(standing.Text)
+		standing.Truncated = standing.Truncated || project.Truncated
+		standing.Next = append(standing.Next, project.Next...)
+		if len(standing.Next) > c.Brief.NextCap {
+			standing.Next = standing.Next[:c.Brief.NextCap]
 		}
-		global.Text += "\n\n" + project.Text
-		global.Tokens = Estimate(global.Text)
-		global.Truncated = global.Truncated || project.Truncated
-		global.Next = append(global.Next, project.Next...)
-		if len(global.Next) > c.Brief.NextCap {
-			global.Next = global.Next[:c.Brief.NextCap]
-		}
-		return global, nil
+		return standing, nil
 	}
 	return global(s, c, all, budget, map[string]bool{})
 }
@@ -453,7 +479,7 @@ func Recall(s *memory.Store, m *model.Client, c *config.Config, args RecallArgs)
 	}
 	budget := args.Budget
 	if budget == 0 {
-		budget = 1500
+		budget = c.Brief.RecallBudget
 	}
 	if budget < 200 {
 		return Result{}, fmt.Errorf("recall budget must be at least 200")

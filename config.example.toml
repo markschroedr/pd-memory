@@ -64,7 +64,12 @@ max_limit = 40
 rrf_k = 60
 
 [brief]
-budget = 16000
+# Standing brief without a folder. A folder brief adds the project part; a requested total
+# splits in this ratio.
+global_budget = 8000
+project_budget = 4000
+# Default for recall, including the situational recall a host adds at the first prompt.
+recall_budget = 1500
 spine_share = 0.3
 # Each further line from the same page counts this factor less, so one page cannot take the whole standing brief.
 page_decay = 0.95

@@ -26,7 +26,6 @@ type PiMemoryConfig = {
   capture_mode?: "daily" | "live";
   capture_after?: string;
   timeout_ms?: number;
-  situational_budget?: number;
 };
 
 const CONFIG_ENV = "PD_MEMORY_PI_CONFIG";
@@ -47,7 +46,7 @@ export default async function pdMemory(pi: PiApi): Promise<void> {
       const standing = await client.call("brief", { folder });
       let content = `Standing memory brief\n\n${standing.text}`;
       try {
-        const recalled = await client.call("recall", { queries: [event.prompt], folder, budget: settings.situational_budget ?? 1500 });
+        const recalled = await client.call("recall", { queries: [event.prompt], folder });
         content += `\n\nRecalled for your first request\n\n${recalled.text}`;
       } catch (error) {
         context.ui.notify(`pd-memory recall unavailable: ${message(error)}`, "warning");
@@ -140,9 +139,6 @@ function readSettings(path: string): PiMemoryConfig {
   if (typeof raw.config !== "string" || !isAbsolute(raw.config)) throw new Error(`${CONFIG_ENV} requires absolute config`);
   if (raw.capture_mode !== undefined && raw.capture_mode !== "daily" && raw.capture_mode !== "live") {
     throw new Error(`${CONFIG_ENV} capture_mode must be daily or live`);
-  }
-  if (raw.situational_budget !== undefined && (!Number.isSafeInteger(raw.situational_budget) || raw.situational_budget < 200)) {
-    throw new Error(`${CONFIG_ENV} situational_budget must be an integer of at least 200`);
   }
   if (raw.capture_after !== undefined && Number.isNaN(Date.parse(raw.capture_after))) throw new Error(`${CONFIG_ENV} capture_after must be an ISO timestamp`);
   return { ...raw, capture_mode: raw.capture_mode ?? "daily", binary: raw.binary, config: resolve(raw.config),
