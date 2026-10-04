@@ -247,7 +247,7 @@ func Current(s *memory.Store, c *config.Config, folder string, budget int) (Resu
 		all = projectRows(all, scores, hidden)
 	}
 	shown := map[string]bool{}
-	r, e := assemble(s, c, all, budget, "", len(all), scores, false, shown)
+	r, e := assemble(s, c, all, budget, "", 1, scores, false, shown)
 	ids := []string{}
 	for id := range shown {
 		ids = append(ids, id)
@@ -382,7 +382,7 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 				rs = append(rs, o)
 			}
 		}
-		return assemble(s, c, rs, budget, "# "+args.Page, len(rs), nil, false, map[string]bool{})
+		return assemble(s, c, rs, budget, "# "+args.Page, 1, nil, false, map[string]bool{})
 	}
 	if args.Folder != "" {
 		folder, e := filepath.Abs(args.Folder)
@@ -410,7 +410,7 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 				shown[id] = true
 			}
 		} else {
-			project, e = assemble(s, c, rs, projectBudget, "# Project: "+filepath.Base(folder), len(rs), scores, false, shown)
+			project, e = assemble(s, c, rs, projectBudget, "# Project: "+filepath.Base(folder), 1, scores, false, shown)
 			if e != nil {
 				return Result{}, e
 			}
@@ -488,7 +488,7 @@ func Recall(s *memory.Store, m *model.Client, c *config.Config, args RecallArgs)
 			relevance[p] = math.Max(relevance[p], o.Rank)
 		}
 	}
-	r, e := assemble(s, c, rs, budget, "# Recall: "+strings.Join(queries, "; "), len(rs), relevance, false, map[string]bool{})
+	r, e := assemble(s, c, rs, budget, "# Recall: "+strings.Join(queries, "; "), 1, relevance, false, map[string]bool{})
 	if e != nil {
 		return Result{}, e
 	}
@@ -558,7 +558,7 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 				rs = append(rs, o)
 			}
 		}
-		standing, e = assemble(s, c, rs, budget, "", c.Brief.PerPageCap, nil, true, shown)
+		standing, e = assemble(s, c, rs, budget, "", c.Brief.PageDecay, nil, true, shown)
 		if e != nil {
 			return Result{}, e
 		}
@@ -579,7 +579,7 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 	standing.Truncated = standing.Truncated || truncated
 	return standing, nil
 }
-func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title string, cap int, scores map[string]float64, dir bool, shown map[string]bool) (Result, error) {
+func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title string, decay float64, scores map[string]float64, dir bool, shown map[string]bool) (Result, error) {
 	pages, e := s.Pages()
 	if e != nil {
 		return Result{}, e
@@ -646,23 +646,96 @@ func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title 
 	}
 	main := budget - reserve
 	spineLimit := int(float64(main) * c.Brief.SpineShare)
+	totalAffinity := 0.
+	for _, item := range items {
+		if scores != nil {
+			totalAffinity += math.Pow(scores[item.Page.Slug], float64(c.Brief.ProjectAffinityExponent))
+		}
+	}
+	// Lines enter by rank, each under the first page in page order that shows it. A page appears
+	// once it holds a line, and each further line from it counts decay less, so space follows rank
+	// without one page taking everything.
+	type candidate struct {
+		item   int
+		o      ranked
+		tokens int
+	}
+	candidates := []candidate{}
+	for i, item := range items {
+		for _, o := range item.Rows {
+			candidates = append(candidates, candidate{i, o, Estimate(line(o, c))})
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].o.Rank > candidates[j].o.Rank })
 	spine := Estimate(title)
+	spent := spine
 	included := []pageRows{}
 	headings := map[string]string{}
-	for _, item := range items {
-		heading := fmt.Sprintf(" %s (%s)", item.Page.Slug, item.Page.Category)
+	selected := map[string][]ranked{}
+	rendered := map[string]bool{}
+	pageSpent := map[string]int{}
+	heading := func(item pageRows) string {
+		h := fmt.Sprintf(" %s (%s)", item.Page.Slug, item.Page.Category)
 		if item.Page.Line != nil {
-			heading += " — " + *item.Page.Line
+			h += " — " + *item.Page.Line
 		}
-		heading += fmt.Sprintf(" (%d)", len(item.Rows))
-		n := Estimate("\n##" + heading)
-		if (spine+n > spineLimit && len(included) > 0) || spine+n > main {
-			break
-		}
-		included = append(included, item)
-		headings[item.Page.Slug] = heading
-		spine += n
+		return h + fmt.Sprintf(" (%d)", len(item.Rows))
 	}
+	fill := func(limit int, newPages bool) {
+		for {
+			best, bestScore, bestHeading := -1, 0., 0
+			for i, x := range candidates {
+				item := items[x.item]
+				id := item.Page.Slug
+				if rendered[x.o.ID] {
+					continue
+				}
+				h := 0
+				if _, open := headings[id]; !open {
+					if !newPages {
+						continue
+					}
+					h = Estimate("\n##" + heading(item))
+					if spine+h > spineLimit && len(included) > 0 {
+						continue
+					}
+				}
+				if spent+h+x.tokens > limit {
+					continue
+				}
+				if scores != nil && totalAffinity > 0 && float64(pageSpent[id]+x.tokens) > float64(main)*math.Pow(scores[id], float64(c.Brief.ProjectAffinityExponent))/totalAffinity {
+					continue
+				}
+				if score := x.o.Rank * math.Pow(decay, float64(len(selected[id]))); best < 0 || score > bestScore {
+					best, bestScore, bestHeading = i, score, h
+				}
+			}
+			if best < 0 {
+				return
+			}
+			x := candidates[best]
+			item := items[x.item]
+			id := item.Page.Slug
+			if bestHeading > 0 {
+				headings[id] = heading(item)
+				included = append(included, item)
+				spine += bestHeading
+				spent += bestHeading
+			}
+			selected[id] = append(selected[id], x.o)
+			pageSpent[id] += x.tokens
+			spent += x.tokens
+			rendered[x.o.ID] = true
+			shown[x.o.ID] = true
+		}
+	}
+	fill(main, true)
+	// Render in page order; inclusion order followed rank.
+	order := map[string]int{}
+	for i, item := range items {
+		order[item.Page.Slug] = i
+	}
+	sort.Slice(included, func(i, j int) bool { return order[included[i].Page.Slug] < order[included[j].Page.Slug] })
 	covered := map[string]bool{}
 	for _, item := range included {
 		for _, o := range item.Rows {
@@ -676,50 +749,8 @@ func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title 
 			return Result{}, e
 		}
 	}
-	spent := spine
-	dirTokens := Estimate(directoryText)
-	selected := map[string][]ranked{}
-	rendered := map[string]bool{}
-	pageSpent := map[string]int{}
-	totalAffinity := 0.
-	for _, item := range included {
-		if scores != nil {
-			totalAffinity += math.Pow(scores[item.Page.Slug], float64(c.Brief.ProjectAffinityExponent))
-		}
-	}
-	// Skip duplicate rows without spending a page slot, so shared claims refill rather than leaving holes.
-	positions := map[string]int{}
-	for round := 0; round < cap; round++ {
-		progress := false
-		for _, item := range included {
-			id := item.Page.Slug
-			pos := positions[id]
-			for pos < len(item.Rows) && rendered[item.Rows[pos].ID] {
-				pos++
-			}
-			positions[id] = pos + 1
-			if pos >= len(item.Rows) {
-				continue
-			}
-			o := item.Rows[pos]
-			n := Estimate(line(o, c))
-			if spent+n > budget-dirTokens {
-				continue
-			}
-			if scores != nil && totalAffinity > 0 && float64(pageSpent[id]+n) > float64(budget-spine)*math.Pow(scores[id], float64(c.Brief.ProjectAffinityExponent))/totalAffinity {
-				continue
-			}
-			selected[id] = append(selected[id], o)
-			pageSpent[id] += n
-			spent += n
-			rendered[o.ID] = true
-			shown[o.ID] = true
-			progress = true
-		}
-		if !progress {
-			break
-		}
-	}
+	// Directory space it did not need goes to more lines on pages already shown.
+	fill(budget-Estimate(directoryText), false)
 	b := Builder{Budget: budget}
 	b.Add(title)
 	includedSet := map[string]bool{}
