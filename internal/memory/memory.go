@@ -183,6 +183,27 @@ func ID() string {
 	}
 	return hex.EncodeToString(b[:])
 }
+
+// Present is memory's own now: the latest source date, never after the clock. Freshness decays
+// from here, so a paused, rebuilt, or replayed memory does not age without newer sources.
+func (s *Store) Present() (time.Time, error) {
+	var latest *string
+	if e := s.DB.QueryRow("SELECT max(coalesce(json_extract(payload,'$.happened'),created)) FROM inputlog.entries WHERE kind='source'").Scan(&latest); e != nil {
+		return time.Time{}, e
+	}
+	now := time.Now().UTC()
+	if latest == nil {
+		return now, nil
+	}
+	t, e := time.Parse(time.RFC3339Nano, *latest)
+	if e != nil {
+		t, e = time.Parse("2006-01-02", (*latest)[:min(10, len(*latest))])
+	}
+	if e != nil || t.After(now) {
+		return now, nil
+	}
+	return t, nil
+}
 func (s *Store) Seq() (int64, error) {
 	var n int64
 	e := s.DB.QueryRow("SELECT coalesce(max(seq),0) FROM fold_state WHERE status='done'").Scan(&n)

@@ -175,7 +175,9 @@ func Lexical(s *memory.Store, query, layer string, pages []string, phrase bool) 
 	}
 	return ids, rs.Err()
 }
-func Freshness(happened *string, entered string, durability *float64) float64 {
+
+// Freshness stays 1 until happened, so an upcoming dated event is current until it passes.
+func Freshness(happened *string, entered string, durability *float64, now time.Time) float64 {
 	if durability == nil {
 		return 1
 	}
@@ -187,13 +189,13 @@ func Freshness(happened *string, entered string, durability *float64) float64 {
 	if e != nil {
 		t, _ = time.Parse("2006-01-02", date)
 	}
-	return math.Pow(2, -math.Max(0, time.Since(t).Hours()/24) / *durability)
+	return math.Pow(2, -math.Max(0, now.Sub(t).Hours()/24) / *durability)
 }
-func Variables(o memory.Observation, c *config.Config, relevance float64) map[string]float64 {
+func Variables(o memory.Observation, c *config.Config, relevance float64, now time.Time) map[string]float64 {
 	v := config.Variables()
 	v["weight"] = o.Weight
 	v["confidence"] = o.Confidence
-	v["freshness"] = Freshness(o.Happened, o.Entered, o.Durability)
+	v["freshness"] = Freshness(o.Happened, o.Entered, o.Durability, now)
 	v["source_prior"] = 0
 	v["sources"] = float64(len(o.Sources))
 	v["relevance"] = relevance
@@ -259,6 +261,10 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 	if e != nil {
 		return out, e
 	}
+	now, e := s.Present()
+	if e != nil {
+		return out, e
+	}
 	allowed := func(o memory.Observation) bool {
 		if len(pages) == 0 {
 			return true
@@ -306,7 +312,7 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 			continue
 		}
 		relevance := r / max
-		score, e := c.Evaluate(c.CallSites.Search, Variables(o, c, relevance*1.05))
+		score, e := c.Evaluate(c.CallSites.Search, Variables(o, c, relevance*1.05, now))
 		if e != nil {
 			return out, e
 		}

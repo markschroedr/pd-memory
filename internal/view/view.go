@@ -147,7 +147,11 @@ func (e *Engine) Composition(folder string, target int) (memory.View, error) {
 	if err != nil {
 		return memory.View{}, err
 	}
-	input := fmt.Sprintf("Current date: %s\nTarget length: about %d tokens.\nAllowed observation IDs: %s\n\n--- BEGIN SECTION ---\n%s\n--- END SECTION ---", time.Now().Format("2006-01-02"), target, strings.Join(ids, ", "), r.Text)
+	present, err := e.Store.Present()
+	if err != nil {
+		return memory.View{}, err
+	}
+	input := fmt.Sprintf("Current date: %s\nTarget length: about %d tokens.\nAllowed observation IDs: %s\n\n--- BEGIN SECTION ---\n%s\n--- END SECTION ---", present.Format("2006-01-02"), target, strings.Join(ids, ", "), r.Text)
 	return e.generate(scope, "composition", scope, composeSystem, input, ids, r.Seq)
 }
 func (e *Engine) failed(out *Result, id string, err error) error {

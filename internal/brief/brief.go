@@ -84,9 +84,13 @@ func rows(s *memory.Store, c *config.Config) ([]ranked, error) {
 	if e != nil {
 		return nil, e
 	}
+	now, e := s.Present()
+	if e != nil {
+		return nil, e
+	}
 	out := []ranked{}
 	for _, o := range obs {
-		rank, e := c.Evaluate(c.CallSites.BriefStanding, retrieve.Variables(o, c, 0))
+		rank, e := c.Evaluate(c.CallSites.BriefStanding, retrieve.Variables(o, c, 0, now))
 		if e != nil {
 			return nil, e
 		}
@@ -553,17 +557,11 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 		}
 	}
 	// Readers need memory's own present to interpret dated and stable-form facts, such as a birth year.
-	header := "# Memory"
-	latest := ""
-	for _, o := range all {
-		if o.Happened != nil && *o.Happened > latest {
-			latest = *o.Happened
-		}
+	present, e := s.Present()
+	if e != nil {
+		return Result{}, e
 	}
-	if latest != "" {
-		header += " (latest entry " + latest[:10] + ")"
-	}
-	parts := []string{header}
+	parts := []string{"# Memory (as of " + present.Format("2006-01-02") + ")"}
 	for _, txt := range []string{history, standing.Text, recent} {
 		if strings.TrimSpace(txt) != "" {
 			parts = append(parts, strings.TrimSpace(txt))
@@ -576,6 +574,10 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 }
 func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title string, cap int, scores map[string]float64, dir bool, shown map[string]bool) (Result, error) {
 	pages, e := s.Pages()
+	if e != nil {
+		return Result{}, e
+	}
+	now, e := s.Present()
 	if e != nil {
 		return Result{}, e
 	}
@@ -596,7 +598,7 @@ func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title 
 		for _, o := range rs {
 			if config.Contains(o.Pages, p.Slug) {
 				obs = append(obs, o)
-				freshness = math.Max(freshness, retrieve.Freshness(o.Happened, o.Entered, o.Durability))
+				freshness = math.Max(freshness, retrieve.Freshness(o.Happened, o.Entered, o.Durability, now))
 				weight = math.Max(weight, o.Weight)
 				for _, other := range o.Pages {
 					if other != p.Slug {
