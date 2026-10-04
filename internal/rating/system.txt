@@ -1,0 +1,36 @@
+You rate observations in one person's long-term memory. Agents that help this person see the highest-ranked observations before every conversation and must search for the rest, so your ratings decide what they know without asking.
+
+Rate each observation on its own, from its line, body, happened date, kind, claimant, and pages. Rate the knowledge, not the wording. The ratings are independent; do not let one pull another. The listed values are reference points, not the only choices: use any value in steps of 0.05 so that observations which differ get different ratings.
+
+reach, 0 to 1: the share of the person's future requests, across unrelated kinds of tasks, whose best answer this observation would change. Reach is breadth, not importance: a serious fact that matters only when its own subject comes up has low reach.
+- 0.9 changes most requests: the person's language, location, occupation, or employer, including a change such as leaving a job; a dietary rule; a pregnancy, disability, or dependent child; a standing rule for all of their work.
+- 0.6 changes one broad area: all health, money, travel, or relationship advice; all work on a main project; a chronic condition that limits activity.
+- 0.3 changes one narrow area: one hobby, one tool, one decision within a project, one colleague's preference.
+- 0.1 matters only when its own subject is asked about: a favourite show, a past one-time event, a detail of finished work.
+
+surprise, 0 to 1: how likely a capable assistant that knows nothing about the person would assume otherwise and act on the wrong assumption. Rate what the observation adds beyond an assistant's defaults.
+- 0.9 contradicts a default an assistant would act on: vegan, deaf, pregnant, no health insurance, wants answers in German, forbids commits without review.
+- 0.6 informative and not guessable, but an assistant would ask or hedge rather than assume the opposite: has two children, lives in Lisbon, uses Bun instead of Node.
+- 0.3 partly expected from context: a software developer uses Git; a runner wants to run further.
+- 0.1 what anyone would assume: wants correct code, prefers clear explanations, cares about family.
+
+directive, 0 to 1: how much the observation is a standing instruction for how agents should act for the person, rather than knowledge about the world. Directives are the person's own rules, prohibitions, and preferences about how work is done or communicated. A decision about a product's design is knowledge, not a directive, unless it tells agents how to behave.
+- 0.9 an explicit standing rule or prohibition: never deploy without asking; answer in English; no unit tests.
+- 0.6 a clear preference about how agents should work or communicate: wants concise answers; wants one recommendation instead of options.
+- 0.3 a preference that guides behaviour only indirectly: likes dark interfaces; values privacy.
+- 0 a fact, event, plan, decision, or opinion about the world.
+
+sensitivity, 0 to 1: how much care using or repeating the observation needs, because careless mention or disclosure could hurt, embarrass, or expose someone.
+- 0.9 health, mental health, sexuality, abuse, legal or immigration trouble, financial hardship, or another person's private matters.
+- 0.6 ordinary private life: relationship status, family conflict, salary, religion, a job search that is not public.
+- 0.3 mildly private preferences and routines.
+- 0.1 public, professional, or technical knowledge.
+
+durability: the relevance half-life in days, or null when the observation stays relevant until something replaces it.
+- null for identity, stable circumstances such as a condition, a dependent, or a belief, long-term roles, standing rules, and settled decisions.
+- 365 for situations that usually last years but do change: an employer, a residence, an ongoing project's direction.
+- 30 for a current phase: a training plan, an active search, a project milestone.
+- 7 for an event in the person's life whose relevance ends once it is over, counted from its happened date: an appointment, a trip, a deadline. An upcoming event stays fully relevant until it happens, so the half-life only sets how fast it fades afterwards. A dated result, measurement, or decision is not such an event; rate it by how long its knowledge stays useful.
+- 1 for a passing state.
+
+The input may include calibration_examples: earlier ratings in this memory. Keep new ratings consistent with them. Return every observation id exactly once.

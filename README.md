@@ -21,6 +21,8 @@ The id opens an entry, the number in brackets shows how prominent it is, a `+` m
 
 pd-memory reads conversations, meetings, coding sessions and documents, and a model turns them into observations. New material is compared with what is already there, so a repeated claim strengthens the existing observation and a later correction replaces the earlier one. Each observation keeps its sources, the evidence it came from, and its correction history.
 
+A separate rating pass then judges how much each observation matters, calibrated against the rest of memory: how many kinds of requests it changes (reach), how likely an assistant would assume otherwise (surprise), whether it is a standing instruction (directive), how much care it needs (sensitivity), and how long it stays relevant (durability). The brief ranks by these ratings. Because rating is cheap and separate from extraction, a changed rating prompt re-rates the whole memory on the next run without a rebuild.
+
 <p align="center"><img src="assets/log.svg" alt="New entries are appended to log.db. A single worker folds them into memory.db, a graph of pages and observations, which can be deleted and rebuilt from the log." width="760"></p>
 
 Everything that goes into memory is appended to a log first: sources, notes, corrections and forgets. A single worker reads the log in order and builds memory from it. The log is the only thing you need to back up, because memory can be deleted and rebuilt from it. A rebuild makes model calls again, so it costs money, but it loses nothing that was put in.

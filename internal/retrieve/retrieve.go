@@ -193,9 +193,13 @@ func Freshness(happened *string, entered string, durability *float64, now time.T
 }
 func Variables(o memory.Observation, c *config.Config, relevance float64, now time.Time) map[string]float64 {
 	v := config.Variables()
-	v["weight"] = o.Weight
+	r := o.Rated()
+	v["reach"] = r.Reach
+	v["surprise"] = r.Surprise
+	v["directive"] = r.Directive
+	v["sensitivity"] = r.Sensitivity
 	v["confidence"] = o.Confidence
-	v["freshness"] = Freshness(o.Happened, o.Entered, o.Durability, now)
+	v["freshness"] = Freshness(o.Happened, o.Entered, r.Durability, now)
 	v["source_prior"] = 0
 	v["sources"] = float64(len(o.Sources))
 	v["relevance"] = relevance
@@ -323,7 +327,7 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 		if !strings.HasPrefix(id, "src:") || !strings.Contains(id, "/") {
 			continue
 		}
-		rs, e := s.Query(`SELECT c.context,CASE WHEN l.kind='source' THEN json_extract(l.payload,'$.kind') WHEN l.actor='user' THEN 'note_user' ELSE 'note_agent' END source_kind,coalesce(max(json_extract(o.value,'$.weight')),0.3) weight,coalesce(max(json_extract(o.value,'$.confidence')),0.5) confidence,count(o.id) sources FROM chunks c JOIN inputlog.entries l ON l.seq=c.source_seq LEFT JOIN evidence ev ON ev.chunk=c.id LEFT JOIN observations o ON o.id=ev.observation AND o.replaced_by IS NULL AND o.forgotten IS NULL WHERE c.id=? GROUP BY c.id`, id)
+		rs, e := s.Query(`SELECT c.context,CASE WHEN l.kind='source' THEN json_extract(l.payload,'$.kind') WHEN l.actor='user' THEN 'note_user' ELSE 'note_agent' END source_kind,coalesce(max(json_extract(r.value,'$.reach')),0.3) reach,coalesce(max(json_extract(o.value,'$.confidence')),0.5) confidence,count(o.id) sources FROM chunks c JOIN inputlog.entries l ON l.seq=c.source_seq LEFT JOIN evidence ev ON ev.chunk=c.id LEFT JOIN observations o ON o.id=ev.observation AND o.replaced_by IS NULL AND o.forgotten IS NULL LEFT JOIN ratings r ON r.observation=o.id AND r.line=json_extract(o.value,'$.line') WHERE c.id=? GROUP BY c.id`, id)
 		if e != nil {
 			return out, e
 		}
@@ -332,7 +336,7 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 		}
 		v := config.Variables()
 		v["relevance"] = r / max
-		v["weight"] = number(rs[0]["weight"])
+		v["reach"] = number(rs[0]["reach"])
 		v["confidence"] = number(rs[0]["confidence"])
 		v["sources"] = number(rs[0]["sources"])
 		v["source_prior"] = c.SourcePriors[rs[0]["source_kind"].(string)]

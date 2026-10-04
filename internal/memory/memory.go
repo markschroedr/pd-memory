@@ -15,15 +15,42 @@ import (
 )
 
 type Fields struct {
-	Line       string   `json:"line" jsonschema:"minLength=1"`
-	Body       *string  `json:"body" jsonschema:"nullable"`
-	Happened   *string  `json:"happened" jsonschema:"nullable"`
-	Claimant   *string  `json:"claimant" jsonschema:"nullable"`
-	Authority  string   `json:"authority" jsonschema:"enum=user,enum=agent,enum=third_party,enum=unknown"`
-	Kind       string   `json:"kind" jsonschema:"enum=fact,enum=question,enum=commitment"`
-	Confidence float64  `json:"confidence" jsonschema:"minimum=0,maximum=1"`
-	Weight     float64  `json:"weight" jsonschema:"minimum=0,maximum=1"`
-	Durability *float64 `json:"durability" jsonschema:"nullable,exclusiveMinimum=0"`
+	Line       string  `json:"line" jsonschema:"minLength=1"`
+	Body       *string `json:"body" jsonschema:"nullable"`
+	Happened   *string `json:"happened" jsonschema:"nullable"`
+	Claimant   *string `json:"claimant" jsonschema:"nullable"`
+	Authority  string  `json:"authority" jsonschema:"enum=user,enum=agent,enum=third_party,enum=unknown"`
+	Kind       string  `json:"kind" jsonschema:"enum=fact,enum=question,enum=commitment"`
+	Confidence float64 `json:"confidence" jsonschema:"minimum=0,maximum=1"`
+}
+
+// Ratings judge how much an observation matters relative to the rest of memory. Fields record what
+// a source says; ratings are rated afterwards from the final line, so they can be calibrated
+// against the memory and rated again cheaply when their definitions change.
+type Ratings struct {
+	Reach       float64  `json:"reach" jsonschema:"minimum=0,maximum=1"`
+	Surprise    float64  `json:"surprise" jsonschema:"minimum=0,maximum=1"`
+	Directive   float64  `json:"directive" jsonschema:"minimum=0,maximum=1"`
+	Sensitivity float64  `json:"sensitivity" jsonschema:"minimum=0,maximum=1"`
+	Durability  *float64 `json:"durability" jsonschema:"nullable,exclusiveMinimum=0"`
+}
+
+// Unrated ranks an observation that has no ratings yet: middling, permanent, and not a directive.
+var Unrated = Ratings{Reach: .5, Surprise: .5}
+
+// RetiredFields were observation fields before ratings replaced them. The canonical log and
+// extraction caches still hold them, so decoding those records drops them.
+var RetiredFields = []string{"weight", "durability"}
+
+func WithoutRetired(raw []byte) ([]byte, error) {
+	var v map[string]json.RawMessage
+	if e := json.Unmarshal(raw, &v); e != nil {
+		return nil, e
+	}
+	for _, k := range RetiredFields {
+		delete(v, k)
+	}
+	return json.Marshal(v)
 }
 
 func (f Fields) Validate() error {
@@ -39,11 +66,8 @@ func (f Fields) Validate() error {
 	if !member([]string{"fact", "question", "commitment"}, f.Kind) {
 		return fmt.Errorf("kind %q must be fact, question, or commitment", f.Kind)
 	}
-	if f.Confidence < 0 || f.Confidence > 1 || f.Weight < 0 || f.Weight > 1 {
-		return fmt.Errorf("confidence %v and weight %v must be between 0 and 1", f.Confidence, f.Weight)
-	}
-	if f.Durability != nil && *f.Durability <= 0 {
-		return fmt.Errorf("durability %v must be positive days or null", *f.Durability)
+	if f.Confidence < 0 || f.Confidence > 1 {
+		return fmt.Errorf("confidence %v must be between 0 and 1", f.Confidence)
 	}
 	return Date(f.Happened)
 }
@@ -70,6 +94,7 @@ func member(xs []string, s string) bool {
 
 type Observation struct {
 	Fields
+	Ratings       *Ratings    `json:"ratings,omitempty"`
 	ID            string      `json:"id"`
 	Seq           int64       `json:"seq"`
 	Entered       string      `json:"entered"`
@@ -240,7 +265,7 @@ func (s *Store) ObservationsByIDs(ids []string) ([]Observation, error) {
 	return s.observations(" WHERE id IN (SELECT value FROM json_each(?))", JSON(ids))
 }
 func (s *Store) observations(where string, args ...any) ([]Observation, error) {
-	q := "SELECT id,value,seq,entered,replaced_by,forgotten FROM observations" + where + " ORDER BY entered,id"
+	q := "SELECT id,value,seq,entered,replaced_by,forgotten,(SELECT r.value FROM ratings r WHERE r.observation=observations.id AND r.line=json_extract(observations.value,'$.line')) FROM observations" + where + " ORDER BY entered,id"
 	rs, e := s.DB.Query(q, args...)
 	if e != nil {
 		return nil, e
@@ -249,11 +274,15 @@ func (s *Store) observations(where string, args ...any) ([]Observation, error) {
 	for rs.Next() {
 		var o Observation
 		var v string
-		if e = rs.Scan(&o.ID, &v, &o.Seq, &o.Entered, &o.ReplacedBy, &o.Forgotten); e != nil {
+		var r *string
+		if e = rs.Scan(&o.ID, &v, &o.Seq, &o.Entered, &o.ReplacedBy, &o.Forgotten, &r); e != nil {
 			rs.Close()
 			return nil, e
 		}
-		if e = json.Unmarshal([]byte(v), &o.Fields); e != nil {
+		if e = json.Unmarshal([]byte(v), &o.Fields); e == nil && r != nil {
+			e = json.Unmarshal([]byte(*r), &o.Ratings)
+		}
+		if e != nil {
 			rs.Close()
 			return nil, e
 		}
@@ -482,6 +511,12 @@ func (s *Store) Cost() (float64, error) {
 	e := s.DB.QueryRow("SELECT coalesce(sum(cost_usd),0) FROM model_calls").Scan(&n)
 	return n, e
 }
+func (o Observation) Rated() Ratings {
+	if o.Ratings == nil {
+		return Unrated
+	}
+	return *o.Ratings
+}
 func (o Observation) Text() string {
 	if o.Body != nil {
 		return o.Line + "\n\n" + *o.Body
@@ -504,6 +539,7 @@ CREATE INDEX IF NOT EXISTS chunk_evidence ON evidence(chunk);
 CREATE TABLE IF NOT EXISTS embeddings(entry_id TEXT NOT NULL,model TEXT NOT NULL,dimension INTEGER NOT NULL,vector BLOB NOT NULL,PRIMARY KEY(entry_id,model));
 CREATE TABLE IF NOT EXISTS views(id TEXT PRIMARY KEY,kind TEXT NOT NULL,scope TEXT NOT NULL,text TEXT NOT NULL,headline TEXT NOT NULL,input_ids TEXT NOT NULL,citations TEXT NOT NULL,seq INTEGER NOT NULL,created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS focus(folder TEXT NOT NULL,entry TEXT NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(folder,entry));
+CREATE TABLE IF NOT EXISTS ratings(observation TEXT PRIMARY KEY,line TEXT NOT NULL,version TEXT NOT NULL,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS maintenance_errors(id TEXT PRIMARY KEY,error TEXT NOT NULL,created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS model_calls(id INTEGER PRIMARY KEY,seq INTEGER,phase TEXT NOT NULL,request_id TEXT,model TEXT NOT NULL,tier TEXT,usage TEXT NOT NULL,cost_usd REAL NOT NULL,repaired INTEGER NOT NULL,error TEXT,created TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(id UNINDEXED,line,body);

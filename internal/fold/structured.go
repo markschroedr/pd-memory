@@ -52,7 +52,11 @@ func (w *Worker) referencesResolve(e inputlog.Entry) (bool, error) {
 func (w *Worker) structured(e inputlog.Entry) error {
 	switch e.Kind {
 	case "note":
-		n, err := DecodePayload[inputlog.Note](e.Payload)
+		raw, err := memory.WithoutRetired(e.Payload)
+		if err != nil {
+			return err
+		}
+		n, err := DecodePayload[inputlog.Note](raw)
 		if err != nil {
 			return err
 		}
@@ -119,6 +123,9 @@ func (w *Worker) structured(e inputlog.Entry) error {
 		edit, err := DecodePayload[inputlog.Edit](e.Payload)
 		if err != nil {
 			return err
+		}
+		for _, k := range memory.RetiredFields {
+			delete(edit.Patch, k)
 		}
 		if edit.Reason == "" {
 			return fmt.Errorf("edit requires reason")

@@ -584,10 +584,6 @@ func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title 
 	if e != nil {
 		return Result{}, e
 	}
-	now, e := s.Present()
-	if e != nil {
-		return Result{}, e
-	}
 	type pageRows struct {
 		Page  memory.Page
 		Rows  []ranked
@@ -600,13 +596,12 @@ func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title 
 			parent[p.Slug] = *p.Parent
 		}
 		obs := []ranked{}
-		freshness, weight := 0., 0.
+		best := 0.
 		inbound := map[string]bool{}
 		for _, o := range rs {
 			if config.Contains(o.Pages, p.Slug) {
 				obs = append(obs, o)
-				freshness = math.Max(freshness, retrieve.Freshness(o.Happened, o.Entered, o.Durability, now))
-				weight = math.Max(weight, o.Weight)
+				best = math.Max(best, o.Rank)
 				for _, other := range o.Pages {
 					if other != p.Slug {
 						inbound[other] = true
@@ -624,8 +619,7 @@ func assemble(s *memory.Store, c *config.Config, rs []ranked, budget int, title 
 			return obs[i].Rank > obs[j].Rank
 		})
 		v := config.Variables()
-		v["weight"] = weight
-		v["freshness"] = freshness
+		v["best"] = best
 		v["observations"] = float64(len(obs))
 		v["inbound"] = float64(len(inbound))
 		score, e := c.Evaluate(c.CallSites.PageRank, v)

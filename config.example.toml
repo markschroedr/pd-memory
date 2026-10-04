@@ -98,10 +98,10 @@ bucket_3_min = 0.6
 bucket_2_min = 0.3
 
 [formulas]
-standing = "weight * (0.4 + 0.6 * confidence) * freshness * source_prior * (1 + 0.15 * log(1 + sources))"
-situational = "relevance * (0.5 + 0.5 * confidence) * (0.7 + 0.3 * freshness) * source_prior"
-chunk = "relevance * (0.5 + 0.5 * weight) * source_prior"
-page = "weight * (0.5 + 0.5 * freshness) * (1 + 0.1 * log(1 + observations) + 0.05 * log(1 + inbound))"
+standing = "reach * (0.35 + 0.65 * surprise) * (1 + directive * reach) * (0.5 + 0.5 * confidence) * freshness * (0.6 + 0.4 * source_prior) * (1 + 0.15 * log(1 + sources))"
+situational = "relevance * (0.75 + 0.25 * reach) * (0.5 + 0.5 * confidence) * (0.7 + 0.3 * freshness) * source_prior"
+chunk = "relevance * (0.5 + 0.5 * reach) * source_prior"
+page = "best * (1 + 0.1 * log(1 + observations) + 0.05 * log(1 + inbound))"
 
 [call_sites]
 search = "situational"

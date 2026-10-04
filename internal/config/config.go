@@ -251,7 +251,7 @@ func Load(path string) (*Config, error) {
 	return c, nil
 }
 func Variables() map[string]float64 {
-	return map[string]float64{"weight": .7, "confidence": .9, "freshness": 1, "source_prior": 1, "sources": 2, "relevance": .8, "observations": 5, "subpages": 0, "inbound": 2}
+	return map[string]float64{"reach": .5, "surprise": .5, "directive": 0, "sensitivity": 0, "best": .5, "confidence": .9, "freshness": 1, "source_prior": 1, "sources": 2, "relevance": .8, "observations": 5, "subpages": 0, "inbound": 2}
 }
 func (c *Config) Evaluate(name string, values map[string]float64) (float64, error) {
 	formula, ok := c.Formulas[name]

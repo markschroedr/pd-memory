@@ -311,10 +311,10 @@ func browse(s *memory.Store, in BrowseInput) (any, error) {
 			}
 			out["children"] = children
 			sort.Slice(obs, func(i, j int) bool {
-				if obs[i].Weight == obs[j].Weight {
+				if obs[i].Rated().Reach == obs[j].Rated().Reach {
 					return obs[i].Entered > obs[j].Entered
 				}
-				return obs[i].Weight > obs[j].Weight
+				return obs[i].Rated().Reach > obs[j].Rated().Reach
 			})
 			for _, o := range obs {
 				if config.Contains(o.Pages, in.ID) {

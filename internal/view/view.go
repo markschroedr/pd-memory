@@ -260,7 +260,7 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 		digests := []any{}
 		changes := []any{}
 		sourceCount := 0
-		weight := 0.
+		reach := 0.
 		periodSeq := int64(0)
 		topByID := map[string]map[string]any{}
 		for day, periodEntries := range byDay {
@@ -282,7 +282,7 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 					}
 					sourceCount++
 				}
-				records, err := e.Store.Query("SELECT o.id,json_extract(o.value,'$.line') line,json_extract(o.value,'$.weight') weight FROM observations o JOIN contributions c ON c.observation=o.id WHERE c.seq=?", entry.Seq)
+				records, err := e.Store.Query("SELECT o.id,json_extract(o.value,'$.line') line,json_extract(r.value,'$.reach') reach FROM observations o JOIN contributions c ON c.observation=o.id LEFT JOIN ratings r ON r.observation=o.id AND r.line=json_extract(o.value,'$.line') WHERE c.seq=?", entry.Seq)
 				if err != nil {
 					return out, err
 				}
@@ -292,8 +292,8 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 					} else if kind == "month" || kind == "year" {
 						topByID[r["id"].(string)] = r
 					}
-					if x, ok := r["weight"].(float64); ok {
-						weight += x
+					if x, ok := r["reach"].(float64); ok {
+						reach += x
 					}
 				}
 				var intent map[string]any
@@ -312,8 +312,8 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 			top = append(top, row)
 		}
 		sort.Slice(top, func(i, j int) bool {
-			a, _ := top[i]["weight"].(float64)
-			b, _ := top[j]["weight"].(float64)
+			a, _ := top[i]["reach"].(float64)
+			b, _ := top[j]["reach"].(float64)
 			if a == b {
 				return top[i]["id"].(string) < top[j]["id"].(string)
 			}
@@ -353,7 +353,7 @@ func (e *Engine) Maintain(entries []inputlog.Entry) (Result, error) {
 		for _, v := range brief.Cover(existing, start) {
 			earlier = append(earlier, map[string]any{"id": v.ID, "text": v.Text})
 		}
-		input := map[string]any{"content_input": map[string]any{"period": map[string]any{"id": id, "kind": kind, "starts": start, "ends": end}, "source_count": sourceCount, "summed_change_weight": weight, "sources": digests, "children": childContent, "observations": top, "changes": changes, "previous_day": previous}, "allowed_citation_ids": allowed, "context": map[string]any{"earlier_nodes": earlier, "current_state": current.Text}}
+		input := map[string]any{"content_input": map[string]any{"period": map[string]any{"id": id, "kind": kind, "starts": start, "ends": end}, "source_count": sourceCount, "summed_change_reach": reach, "sources": digests, "children": childContent, "observations": top, "changes": changes, "previous_day": previous}, "allowed_citation_ids": allowed, "context": map[string]any{"earlier_nodes": earlier, "current_state": current.Text}}
 		v, err := e.generate(id, kind, "global", timelineSystem, memory.JSON(input), allowed, periodSeq)
 		if err != nil {
 			if err = e.failed(&out, id, err); err != nil {

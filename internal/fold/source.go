@@ -141,8 +141,9 @@ func (w *Worker) extract(e inputlog.Entry, src inputlog.Source) (Extraction, err
 	var cached string
 	err := w.Memory.DB.QueryRow("SELECT value FROM extraction WHERE seq=?", e.Seq).Scan(&cached)
 	if err == nil {
+		// Validated when cached; lenient decoding drops memory.RetiredFields from older caches.
 		var ex Extraction
-		err = model.Decode([]byte(cached), &ex)
+		err = json.Unmarshal([]byte(cached), &ex)
 		return ex, err
 	}
 	if err != sql.ErrNoRows {
@@ -513,7 +514,7 @@ func validateProposal(p Proposal, ex Extraction, pages []memory.Page, observatio
 			return fmt.Errorf("%s has %d observation_ids; discard and create take none, attach_source and update exactly one, supersede one or more, merge one or more with at least two items in total", where, n)
 		}
 		if op.Op == "discard" || op.Op == "attach_source" {
-			if op.Line != "" || op.Body != nil || op.Happened != nil || op.Claimant != nil || op.Authority != "" || op.Kind != "" || op.Confidence != 0 || op.Weight != 0 || op.Durability != nil || len(op.PageKeys) != 0 {
+			if op.Line != "" || op.Body != nil || op.Happened != nil || op.Claimant != nil || op.Authority != "" || op.Kind != "" || op.Confidence != 0 || len(op.PageKeys) != 0 {
 				return fmt.Errorf("%s must leave line, body, scores, and page_keys null or empty", where)
 			}
 			continue
@@ -546,7 +547,7 @@ func integrationSchema() map[string]any {
 	s := model.Schema(new(Proposal))
 	props := s["properties"].(map[string]any)
 	obs := props["observations"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
-	for _, key := range []string{"line", "authority", "kind", "confidence", "weight"} {
+	for _, key := range []string{"line", "authority", "kind", "confidence"} {
 		field := obs[key].(map[string]any)
 		obs[key] = map[string]any{"anyOf": []any{field, map[string]any{"type": "null"}}}
 	}

@@ -41,7 +41,7 @@ Operator commands:
   maintain, rebuild (paid), reindex, doctor [--live], stats, catalog
 
 Observation fields: --line, --body, --happened, --claimant, --kind,
---confidence, --weight, --durability. Edit also accepts --authority and --clear-body.
+--confidence. Edit also accepts --authority and --clear-body.
 All command inputs also accept --input-json JSON. catalog exposes agent JSON schemas.
 Config: PD_MEMORY_CONFIG or ./pd-memory.toml. Writes return queued unless --wait.
 Only ingestion wakes maintenance. Separate workspace directories are privacy boundaries.
@@ -560,9 +560,6 @@ func mutate(c *config.Config, command string, input any, raw map[string]json.Raw
 		}
 		if _, ok := raw["confidence"]; !ok {
 			in.Confidence = 1
-		}
-		if _, ok := raw["weight"]; !ok {
-			in.Weight = .8
 		}
 		if _, ok := raw["kind"]; !ok {
 			in.Kind = "fact"

@@ -16,6 +16,7 @@ import (
 	inputlog "github.com/markschroedr/pd-memory/internal/log"
 	"github.com/markschroedr/pd-memory/internal/memory"
 	"github.com/markschroedr/pd-memory/internal/model"
+	"github.com/markschroedr/pd-memory/internal/rating"
 	"github.com/markschroedr/pd-memory/internal/view"
 )
 
@@ -383,7 +384,7 @@ func Run(c *config.Config, wait, retry bool) (Outcome, error) {
 		}
 		w.Seq = 0
 		if e == nil {
-			out.Maintenance, e = (&view.Engine{Store: w.Memory, Config: c, Model: w.Model}).Maintain(entries)
+			out.Maintenance, e = w.maintain(entries)
 		}
 		out.Cost += w.Model.Cost
 		w.Close()
@@ -475,6 +476,19 @@ func completion(c *config.Config, seqs []int64) error {
 	}
 	return nil
 }
+
+// maintain rates observations, then builds views. Composition selects its input by rank, so
+// ratings come first.
+func (w *Worker) maintain(entries []inputlog.Entry) (view.Result, error) {
+	before := w.Model.Cost
+	if e := rating.Rate(w.Memory, w.Model, w.Config.Ingest.ExtractConcurrency); e != nil {
+		return view.Result{}, e
+	}
+	rated := w.Model.Cost - before
+	out, e := (&view.Engine{Store: w.Memory, Config: w.Config, Model: w.Model}).Maintain(entries)
+	out.Cost += rated
+	return out, e
+}
 func Maintenance(c *config.Config, folder string, budget int, compose bool) (out view.Result, err error) {
 	lock, e := Lock(c.Workspace.Dir, true)
 	if e != nil {
@@ -486,8 +500,11 @@ func Maintenance(c *config.Config, folder string, budget int, compose bool) (out
 		return view.Result{}, e
 	}
 	defer w.Close()
-	engine := &view.Engine{Store: w.Memory, Config: c, Model: w.Model}
 	if compose {
+		if e = rating.Rate(w.Memory, w.Model, c.Ingest.ExtractConcurrency); e != nil {
+			return view.Result{}, e
+		}
+		engine := &view.Engine{Store: w.Memory, Config: c, Model: w.Model}
 		if budget == 0 {
 			budget = c.Brief.Budget
 			if folder != "" {
@@ -501,7 +518,7 @@ func Maintenance(c *config.Config, folder string, budget int, compose bool) (out
 	if e != nil {
 		return view.Result{}, e
 	}
-	return engine.Maintain(entries)
+	return w.maintain(entries)
 }
 func Retry(c *config.Config, seq *int64) (Outcome, error) {
 	lock, e := Lock(c.Workspace.Dir, true)
@@ -626,7 +643,7 @@ func Rebuild(c *config.Config) (out Outcome, err error) {
 		return out, e
 	}
 	w.Seq = 0
-	out.Maintenance, e = (&view.Engine{Store: w.Memory, Config: c, Model: w.Model}).Maintain(entries)
+	out.Maintenance, e = w.maintain(entries)
 	out.Cost = w.Model.Cost
 	return out, e
 }
