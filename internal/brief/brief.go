@@ -402,7 +402,7 @@ func Run(s *memory.Store, m *model.Client, c *config.Config, args Args) (Result,
 		var project Result
 		if v != nil {
 			project = Result{Text: "# Project: " + filepath.Base(folder) + "\n\n" + v.Text, Seq: seq, Tokens: Estimate(v.Text), Next: []string{}}
-			for _, id := range v.InputIDs {
+			for _, id := range v.Citations {
 				shown[id] = true
 			}
 		} else {
@@ -508,8 +508,9 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 	for id := range excluded {
 		timelineExcluded[id] = true
 	}
+	// Only observations the composition cites count as shown; inputs it dropped stay eligible elsewhere.
 	if v != nil {
-		for _, id := range v.InputIDs {
+		for _, id := range v.Citations {
 			timelineExcluded[id] = true
 		}
 	}
@@ -531,7 +532,7 @@ func global(s *memory.Store, c *config.Config, all []ranked, budget int, exclude
 			return Result{}, e
 		}
 		standing = Result{Text: v.Text, Seq: seq, Next: []string{}}
-		for _, id := range v.InputIDs {
+		for _, id := range v.Citations {
 			shown[id] = true
 		}
 		directory, e := directory(s, c, all, shown, int(float64(budget)*c.Brief.DirectoryShare))
