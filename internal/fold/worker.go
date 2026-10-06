@@ -124,30 +124,44 @@ func (w *Worker) client(current func() int64) *model.Client {
 // extractAhead starts extraction for upcoming eligible sources, up to the configured concurrency.
 // Integration stays serial and in log order; only the expensive, independent extraction runs early.
 func (w *Worker) extractAhead(entries []inputlog.Entry, from int64) error {
+	units := map[string]bool{}
 	for _, e := range entries {
 		if len(w.extracting) >= w.Config.Ingest.ExtractConcurrency {
 			return nil
 		}
-		if e.Kind != "source" || e.Seq < from || w.extracting[e.Seq] != nil {
-			continue
-		}
-		if _, done := w.extracted[e.Seq]; done {
+		if e.Kind != "source" || e.Seq < from {
 			continue
 		}
 		ok, err := w.eligible(e)
 		if err != nil {
 			return err
 		}
-		var cached int
-		if err = w.Memory.DB.QueryRow("SELECT count(*) FROM extraction WHERE seq=?", e.Seq).Scan(&cached); err != nil {
-			return err
-		}
-		if !ok || cached > 0 {
+		if !ok {
 			continue
 		}
 		var src inputlog.Source
 		if err = model.Decode(e.Payload, &src); err != nil {
 			return err
+		}
+		// A later increment must not race the earlier increment's digest creation.
+		if src.Session != nil {
+			if units[*src.Session] {
+				continue
+			}
+			units[*src.Session] = true
+		}
+		if w.extracting[e.Seq] != nil {
+			continue
+		}
+		if _, done := w.extracted[e.Seq]; done {
+			continue
+		}
+		var cached int
+		if err = w.Memory.DB.QueryRow("SELECT count(*) FROM extraction WHERE seq=?", e.Seq).Scan(&cached); err != nil {
+			return err
+		}
+		if cached > 0 {
+			continue
 		}
 		ahead := &Worker{Config: w.Config, Log: w.Log, Memory: w.Memory, Seq: e.Seq}
 		seq := e.Seq

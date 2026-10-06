@@ -176,6 +176,10 @@ func (w *Worker) extract(e inputlog.Entry, src inputlog.Source) (Extraction, err
 	if len(current) > 0 {
 		windows = append(windows, current)
 	}
+	prior, err := w.incrementContext(e, src)
+	if err != nil {
+		return Extraction{}, err
+	}
 	ex := Extraction{Participants: []string{}, Observations: []Candidate{}}
 	digests := []string{}
 	for i, window := range windows {
@@ -186,7 +190,7 @@ func (w *Worker) extract(e inputlog.Entry, src inputlog.Source) (Extraction, err
 			render = append(render, "["+ch.ID+"] "+ch.Text)
 		}
 		meta := map[string]any{"source": fmt.Sprintf("src:%d", e.Seq), "kind": src.Kind, "label": src.Label, "home": src.Home, "happened": src.Happened, "external_id": src.ExternalID, "metadata": src.Metadata, "window": i + 1, "windows": len(windows)}
-		out, err := model.Structured[Extraction](w.Model, "extraction", extractionSystem+w.identity(), memory.JSON(meta)+"\n\n<source>\n"+strings.Join(render, "\n\n")+"\n</source>", func(x Extraction) error {
+		out, err := model.Structured[Extraction](w.Model, "extraction", extractionSystem+w.identity(), memory.JSON(meta)+prior+"\n\n<source>\n"+strings.Join(render, "\n\n")+"\n</source>", func(x Extraction) error {
 			if strings.TrimSpace(x.Digest) == "" {
 				return fmt.Errorf("digest required")
 			}
