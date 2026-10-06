@@ -142,7 +142,7 @@ root = "~/projects/example"
 home = "example"
 ```
 
-Unrouted folders use their last folder name as the home page. Speaker names come from `identity.user_names`. When an imported unit resumes, extraction receives earlier source digests as read-only context. Only its new part can supply claims and citations.
+Unrouted folders use their last folder name, normalized to a page slug, as the home page. If that name cannot form a page slug, sync reports the unit under `unrouted`, leaves its cursor unchanged, and continues. Add an explicit route for that folder. Speaker names come from `identity.user_names`. When an imported unit resumes, extraction receives earlier source digests as read-only context. Only its new part can supply claims and citations.
 
 ## Pi
 

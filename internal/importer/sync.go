@@ -42,19 +42,25 @@ type Options struct {
 	DryRun bool   `json:"dry_run,omitempty"`
 	Wait   bool   `json:"wait,omitempty"`
 }
+type UnroutedUnit struct {
+	Path  string `json:"path"`
+	Cwd   string `json:"cwd"`
+	Error string `json:"error"`
+}
 type Result struct {
-	Units     int      `json:"units"`
-	Submitted int      `json:"submitted"`
-	Skipped   int      `json:"skipped"`
-	Messages  int      `json:"messages"`
-	Rewritten []string `json:"rewritten"`
-	Seqs      []int64  `json:"seqs"`
-	DryRun    bool     `json:"dry_run"`
-	Disabled  bool     `json:"disabled,omitempty"`
+	Unrouted  []UnroutedUnit `json:"unrouted"`
+	Units     int            `json:"units"`
+	Submitted int            `json:"submitted"`
+	Skipped   int            `json:"skipped"`
+	Messages  int            `json:"messages"`
+	Rewritten []string       `json:"rewritten"`
+	Seqs      []int64        `json:"seqs"`
+	DryRun    bool           `json:"dry_run"`
+	Disabled  bool           `json:"disabled,omitempty"`
 }
 
 func Run(c *config.Config, l *inputlog.Store, o Options) (Result, error) {
-	out := Result{Seqs: []int64{}, Rewritten: []string{}, DryRun: o.DryRun}
+	out := Result{Seqs: []int64{}, Rewritten: []string{}, Unrouted: []UnroutedUnit{}, DryRun: o.DryRun}
 	if o.Auto && !c.AutoSync {
 		out.Disabled = true
 		return out, nil
@@ -171,7 +177,9 @@ func Run(c *config.Config, l *inputlog.Store, o Options) (Result, error) {
 			}
 			home, e := homeFor(c.Routes, u.Folder)
 			if e != nil {
-				return out, e
+				out.Skipped++
+				out.Unrouted = append(out.Unrouted, UnroutedUnit{Path: u.Path, Cwd: u.Folder, Error: e.Error()})
+				continue
 			}
 			external := u.ID + ":" + inc.LastID
 			if s.Adapter == "pi" {
@@ -236,12 +244,18 @@ func adapterFor(name string) (adapter, error) {
 }
 func homeFor(routes []config.Route, cwd string) (string, error) {
 	best, home := 0, ""
-	path, e := filepath.Abs(cwd)
+	path, e := folderPath(cwd)
 	if e != nil {
 		return "", e
 	}
 	for _, r := range routes {
-		root := r.Root
+		root, e := folderPath(r.Root)
+		if e != nil {
+			return "", e
+		}
+		if !strings.EqualFold(filepath.VolumeName(root), filepath.VolumeName(path)) {
+			continue
+		}
 		rel, e := filepath.Rel(root, path)
 		if e != nil {
 			return "", e
@@ -258,7 +272,20 @@ func homeFor(routes []config.Route, cwd string) (string, error) {
 	if len(leaf) >= 2 && len(leaf) <= 64 && leaf[0] >= 'a' && leaf[0] <= 'z' {
 		return leaf, nil
 	}
-	return "root", nil
+	return "", fmt.Errorf("folder name cannot form a home page; add a route for %q", cwd)
+}
+
+// Existing folder aliases must route like their canonical source paths. Old session folders may no longer exist.
+func folderPath(path string) (string, error) {
+	abs, e := filepath.Abs(path)
+	if e != nil {
+		return "", e
+	}
+	real, e := filepath.EvalSymlinks(abs)
+	if os.IsNotExist(e) {
+		return abs, nil
+	}
+	return real, e
 }
 
 // Excludes are slash-separated path globs relative to the source root; ** matches any depth.
