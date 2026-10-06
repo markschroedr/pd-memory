@@ -519,6 +519,9 @@ func Recall(s *memory.Store, m *model.Client, c *config.Config, args RecallArgs)
 		return Result{}, e
 	}
 	b := Builder{Text: r.Text, Tokens: r.Tokens, Budget: budget}
+	if hits.Lexical != "" {
+		b.Add("\n\nKeyword matches only; semantic search is unavailable: " + hits.Lexical)
+	}
 	if len(already) > 0 {
 		b.Add("\n\nAlso matched, already in the standing brief: " + strings.Join(already, ", "))
 	}

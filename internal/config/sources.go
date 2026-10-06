@@ -85,6 +85,10 @@ func (c *Config) LoadCredentials() error {
 	}
 	path := c.CredentialsFile
 	b, e := os.ReadFile(path)
+	// A missing file means no stored credentials; reads still work and model calls name the unset variable.
+	if os.IsNotExist(e) {
+		return nil
+	}
 	if e != nil {
 		return e
 	}

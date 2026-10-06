@@ -224,6 +224,8 @@ type Hit struct {
 type Result struct {
 	Hits []Hit
 	Cost float64
+	// Lexical names why semantic ranking was skipped; reads stay available without embeddings.
+	Lexical string
 }
 
 // Search ranks observations and source chunks together and returns the best max_limit hits.
@@ -240,13 +242,15 @@ func Search(s *memory.Store, m *model.Client, c *config.Config, queries, pages [
 	before := m.Cost
 	vectors, e := m.Embed(queries)
 	if e != nil {
-		return out, e
+		out.Lexical = e.Error()
 	}
 	scores := map[string]float64{}
 	for _, kind := range []string{"observations", "chunks"} {
-		semantic, e := Nearest(s, vectors, c, kind, pages, 100)
-		if e != nil {
-			return out, e
+		semantic := make([][]Match, len(queries))
+		if out.Lexical == "" {
+			if semantic, e = Nearest(s, vectors, c, kind, pages, 100); e != nil {
+				return out, e
+			}
 		}
 		for i, q := range queries {
 			lex, e := Lexical(s, q, kind, pages, false)
