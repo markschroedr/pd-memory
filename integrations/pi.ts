@@ -47,6 +47,8 @@ export default function pdMemory(pi: ExtensionAPI): void {
     } catch (error) { context.ui.notify(`pd-memory tools unavailable: ${message(error)}`, "warning"); }
   });
   pi.on("before_agent_start", async (event, context) => {
+    // Memory is on exactly when its tools are active; hosts switch it off, as minimal context does, by deactivating them.
+    if (!pi.getActiveTools().includes("memory_brief")) return;
     try {
       const brief = await client.call("brief", { folder: canonical(context.cwd) });
       const block = `<context-block name="memory_brief">\n${brief.text}\n</context-block>`;
