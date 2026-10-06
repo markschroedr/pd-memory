@@ -33,8 +33,7 @@ It is one Go executable and two SQLite files, called as a CLI. It is weakest whe
 
 | System | Direct recall | Target recall | Application |
 | --- | --- | --- | --- |
-| pd-memory, brief and retrieval for the question | 93.6% | 84.8% | **70.4%** |
-| pd-memory, brief and agent-driven search | 87.2% | 80.8% | **69.6%** |
+| **pd-memory** | **93.6%** | **84.8%** | **70.4%** |
 | Naive RAG (text-embedding-3-large) | 97.6% | 6.4% | 16.0% |
 | MemoryOS | 96.8% | 7.2% | 14.4% |
 | A-Mem | 100.0% | 12.0% | 9.6% |
@@ -42,7 +41,7 @@ It is one Go executable and two SQLite files, called as a CLI. It is weakest whe
 | Mem0 | 76.8% | 6.4% | 6.4% |
 | Fact already in context (control) | | 100.0% | 84.0% |
 
-Other rows are from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/). pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings (not the OpenAI default below), and about 1.3k to 2.1k tokens of context per question. One task failed during ingestion and counts as a miss. Each task builds a small memory, so large memories are not measured here.
+Other rows are from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/). pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings (not the OpenAI default below), and about 1.3k to 2.1k tokens of context per question: the brief plus a recall for the question. Letting the agent search on its own instead scored 69.6%. One task failed during ingestion and counts as a miss. Each task builds a small memory, so large memories are not measured here.
 
 ## Quickstart
 
