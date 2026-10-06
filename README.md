@@ -105,3 +105,13 @@ The [Pi extension](integrations/pi.ts) adds memory tools. At the first prompt of
 ```
 
 Capture defaults to daily imports, and `capture_mode: "live"` captures after every turn.
+
+## License
+
+Copyright (c) 2026 Mark Schröder.
+
+pd-memory is licensed under the [GNU Affero General Public License v3.0](LICENSE). If you run a modified version as a network service, you must offer its source to its users.
+
+For use under other terms, for example in a closed-source product, a commercial license is available on request: mark@schroedermark.com.
+
+Commits before this license change remain available under the MIT License.
