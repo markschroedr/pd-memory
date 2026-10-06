@@ -21,6 +21,10 @@ func resolvePath(config, path string) string {
 		path = filepath.Join(home, path[2:])
 	}
 	if !filepath.IsAbs(path) {
+		// Relative paths belong to the real config file, so a symlinked default path keeps working.
+		if real, e := filepath.EvalSymlinks(config); e == nil {
+			config = real
+		}
 		path = filepath.Join(filepath.Dir(config), path)
 	}
 	return filepath.Clean(path)
