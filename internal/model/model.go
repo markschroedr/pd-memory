@@ -274,6 +274,9 @@ func (c *Client) Embed(inputs []string) ([][]float64, error) {
 		return [][]float64{}, nil
 	}
 	cfg := c.Config.Embeddings
+	if cfg.Provider == "openai" && !c.Config.OpenAI.RetentionVerified {
+		return nil, fmt.Errorf("OpenAI embeddings retention is not operator-verified")
+	}
 	local := cfg.Provider == "local_pplx"
 	endpoint := cfg.BaseURL
 	key := ""
@@ -286,7 +289,12 @@ func (c *Client) Embed(inputs []string) ([][]float64, error) {
 			return nil, fmt.Errorf("credential environment variable %s is not set", cfg.APIKeyEnv)
 		}
 		endpoint += "/embeddings"
-		body = map[string]any{"model": cfg.Model, "input": inputs, "encoding_format": "float", "provider": map[string]any{"zdr": true, "allow_fallbacks": false, "only": cfg.Only}}
+		body = map[string]any{"model": cfg.Model, "input": inputs, "encoding_format": "float"}
+		if cfg.Provider == "openrouter" {
+			body["provider"] = map[string]any{"zdr": true, "allow_fallbacks": false, "only": cfg.Only}
+		} else {
+			body["dimensions"] = cfg.Dimension
+		}
 	}
 	call := Call{Phase: "embed", Model: cfg.Model}
 	data, status, id, e := request(&http.Client{Timeout: time.Duration(cfg.TimeoutMS) * time.Millisecond}, endpoint, key, body)

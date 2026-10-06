@@ -8,10 +8,52 @@ dir = "workspace"
 [identity]
 user_names = ["Your name"]
 
-# Defaults use OpenRouter for generation and embeddings, with ZDR-only routing.
-# init verifies the live providers before declaring setup complete.
+# OpenAI is the recommended default. Both models use one OPENAI_API_KEY.
+# Verify account retention before setting retention_verified = true.
+# Without ZDR, standard_store_false requires explicit data-owner approval.
 [openai]
-retention_verified = true
+provider = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-6-luna"
+service_tier = "flex"
+retention_policy = "zero_data_retention"
+retention_verified = false
+
+[embeddings]
+provider = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "text-embedding-3-small"
+dimension = 1024
+
+# Alternative: replace both model sections above and add this pricing section.
+# Both models then use one OPENROUTER_API_KEY; routing enforces ZDR.
+# [openai]
+# provider = "openrouter"
+# base_url = "https://openrouter.ai/api/v1"
+# api_key_env = "OPENROUTER_API_KEY"
+# model = "openai/gpt-6-luna"
+# service_tier = "default"
+# retention_policy = "zero_data_retention"
+# retention_verified = true
+# zdr = true
+# allow_fallbacks = false
+# only = ["Azure"]
+# [embeddings]
+# provider = "openrouter"
+# base_url = "https://openrouter.ai/api/v1"
+# api_key_env = "OPENROUTER_API_KEY"
+# model = "perplexity/pplx-embed-v1-0.6b"
+# dimension = 1024
+# zdr = true
+# allow_fallbacks = false
+# only = ["Perplexity"]
+# [pricing]
+# input_per_million = 0.1
+# cached_input_per_million = 0.01
+# output_per_million = 0.5
+# embedding_per_million = 0.004
 
 [[sources]]
 name = "notes"

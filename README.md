@@ -48,7 +48,7 @@ This is an experimental personal project that I use daily with my own agents. Th
 | Mem0 | 76.8% | 6.4% | 6.4% |
 | Fact already in context (control) | | 100.0% | 84.0% |
 
-Other rows are the paper's results from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/), each with its best reported embedding. pd-memory used `gpt-6-luna` to build memory and `gpt-5-mini` to answer and judge, and its context per question was about 1.3k to 2.1k tokens. One task failed during ingestion and counts as a miss. Each task builds its own small memory, so the brief never had to leave anything out; larger memories are the harder case and not measured here.
+Other rows are the paper's results from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/), each with its best reported embedding. pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings, and `gpt-5-mini` to answer and judge; its context per question was about 1.3k to 2.1k tokens. These numbers do not measure the new OpenAI embedding default. One task failed during ingestion and counts as a miss. Each task builds its own small memory, so the brief never had to leave anything out; larger memories are the harder case and not measured here.
 
 ## Quickstart
 
@@ -59,11 +59,15 @@ pd-memory init
 
 The installer uses `~/.local/bin`; add it to `PATH` if your shell does not already include it. Alternatively, download a macOS, Linux, or Windows binary from [Releases](https://github.com/markschroedr/pd-memory/releases). Each platform has arm64 and x64 binaries. Go users can run `go install github.com/markschroedr/pd-memory@latest`.
 
-`init` asks for your name and one OpenRouter key, creates a workspace, and checks generation and embeddings live. It optionally adds Pi sessions as a source. Release binaries offer to install the matching Pi extension with `pi install`. Development builds use a local checkout instead.
+`init` asks for your name and provider: OpenAI (recommended, default) or OpenRouter. Each choice needs exactly one key, hidden in a terminal. It creates a workspace and checks generation and embeddings live. It optionally adds Pi sessions as a source. Release binaries offer to install the matching Pi extension with `pi install`. Development builds use a local checkout instead.
 
 Configuration lives in `~/.config/pd-memory/pd-memory.toml`. Use `PD_MEMORY_CONFIG` or `--config FILE` to select a different config. Credentials live in a separate private file; environment variables override them. Keep runtime data and credentials outside Git.
 
-Defaults use OpenRouter with ZDR-only routing for generation and embeddings, with no provider fallback. You can instead configure OpenAI generation or a local Perplexity embedding service. Check your provider's retention controls before setting `retention_verified` for a custom provider. `doctor` checks the live models and exits non-zero when setup cannot run. Model calls cost money; `stats` shows recorded usage and estimated cost.
+OpenAI uses `OPENAI_API_KEY` for `gpt-6-luna` generation (Flex, `store=false`) and `text-embedding-3-small` embeddings with 1024 dimensions. Init asks whether the account has zero data retention. Otherwise it explains that OpenAI may retain API data for abuse monitoring and requires explicit approval for standard retention before writing files. Declining writes nothing. `store=false` alone is not proof of ZDR.
+
+OpenRouter uses `OPENROUTER_API_KEY` for `openai/gpt-6-luna` generation through the Azure ZDR route only, plus Perplexity embeddings. Both requests require ZDR and disable provider fallback. Init states this route restriction before requesting the key.
+
+Config can mix generation and embedding providers, including a local Perplexity embedding service. Set the complete provider fields and corresponding pricing; do not change an existing workspace's embedding model without rebuilding its vectors. Embedding providers never fall back to one another. `doctor` checks the live models and exits non-zero when setup cannot run. Model calls cost money; `stats` shows recorded usage and estimated cost.
 
 ## Use
 
@@ -76,7 +80,7 @@ pd-memory note --line "A durable observation." --page root --actor user --wait
 pd-memory help
 ```
 
-Add `--json` for machine output. `catalog` lists every command's input and result schema with the engine version. `brief --folder PATH` adds context for one project, and `focus` adjusts what that project's brief shows. Reads never call a model or write to memory.
+Add `--json` for machine output. `catalog` lists every command's input and result schema with the engine version. `brief --folder PATH` adds context for one project, and `focus` adjusts what that project's brief shows. Recall embeds queries with the configured embedding model. Read commands do not change observations.
 
 Without `--wait`, ingestion returns once the entry is in the log and reports the queued work. `maintain` and `brief --compose` run maintenance by hand when a workspace has been quiet. `rebuild` keeps the old memory next to the new one.
 

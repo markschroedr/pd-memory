@@ -212,7 +212,11 @@ func run(args []string) (code int, err error) {
 			if e != nil {
 				return 0, e
 			}
-			local["live"] = map[string]any{"generation": map[string]any{"ok": out.OK, "returned_model": generation.Model, "returned_service_tier": generation.Tier, "strict_structured_output": true, "store": false}, "embeddings": map[string]any{"returned_model": w.Model.Last.Model, "dimensions": len(vectors[0]), "provider": c.Embeddings.Provider, "zdr": c.Embeddings.ZDR, "allow_fallbacks": c.Embeddings.AllowFallbacks, "only": c.Embeddings.Only}}
+			embedding := map[string]any{"returned_model": w.Model.Last.Model, "dimensions": len(vectors[0]), "provider": c.Embeddings.Provider}
+			if c.Embeddings.Provider == "openrouter" {
+				embedding["zdr"], embedding["allow_fallbacks"], embedding["only"] = c.Embeddings.ZDR, c.Embeddings.AllowFallbacks, c.Embeddings.Only
+			}
+			local["live"] = map[string]any{"generation": map[string]any{"ok": out.OK, "returned_model": generation.Model, "returned_service_tier": generation.Tier, "strict_structured_output": true, "store": false}, "embeddings": embedding}
 			local["cost_usd"] = w.Model.Cost
 		}
 		return 0, print(local)

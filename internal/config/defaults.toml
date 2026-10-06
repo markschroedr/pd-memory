@@ -10,11 +10,11 @@ dir = ""
 
 # Generation uses the OpenAI-compatible Responses API for either provider.
 [openai]
-provider = "openrouter"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-model = "openai/gpt-6-luna"
-service_tier = "default"
+provider = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-6-luna"
+service_tier = "flex"
 store = false
 timeout_ms = 900000
 
@@ -31,20 +31,21 @@ retention_verified = false
 # hosts for your selected model and update [pricing] for its actual rates.
 zdr = true
 allow_fallbacks = false
-only = ["Azure"]
+only = []
 
+# Embedding providers never fall back to one another.
 # For local Perplexity embeddings, set provider = "local_pplx", base_url to
-# the service's /embed endpoint, and model/dimension to its model. No remote fallback.
+# the service's /embed endpoint, and model/dimension to its model.
 [embeddings]
-provider = "openrouter"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-model = "perplexity/pplx-embed-v1-0.6b"
+provider = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "text-embedding-3-small"
 dimension = 1024
 timeout_ms = 120000
-zdr = true
+zdr = false
 allow_fallbacks = false
-only = ["Perplexity"]
+only = []
 
 [identity]
 # Claimant names with explicit workspace roles. Source kind does not set authority.
@@ -131,7 +132,7 @@ coding_session = 0.3
 
 [pricing]
 # USD per million tokens. Keep these aligned with the configured model and tier.
-input_per_million = 0.1
-cached_input_per_million = 0.01
-output_per_million = 0.5
-embedding_per_million = 0.004
+input_per_million = 0.05
+cached_input_per_million = 0.005
+output_per_million = 0.25
+embedding_per_million = 0.02

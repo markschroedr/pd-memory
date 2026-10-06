@@ -187,7 +187,7 @@ func Load(path string) (*Config, error) {
 	c.Workspace.Dir = resolvePath(c.Path, c.Workspace.Dir)
 	c.OpenAI.BaseURL = strings.TrimRight(c.OpenAI.BaseURL, "/")
 	c.Embeddings.BaseURL = strings.TrimRight(c.Embeddings.BaseURL, "/")
-	if !Contains([]string{"openai", "openrouter"}, c.OpenAI.Provider) || !Contains([]string{"local_pplx", "openrouter"}, c.Embeddings.Provider) {
+	if !Contains([]string{"openai", "openrouter"}, c.OpenAI.Provider) || !Contains([]string{"local_pplx", "openrouter", "openai"}, c.Embeddings.Provider) {
 		return nil, fmt.Errorf("invalid provider")
 	}
 	if !Contains([]string{"flex", "default"}, c.OpenAI.ServiceTier) || c.OpenAI.Store || !Contains([]string{"zero_data_retention", "modified_abuse_monitoring", "standard_store_false"}, c.OpenAI.RetentionPolicy) {
@@ -198,6 +198,9 @@ func Load(path string) (*Config, error) {
 	}
 	if c.Embeddings.Provider == "openrouter" && (!c.Embeddings.ZDR || c.Embeddings.AllowFallbacks || len(c.Embeddings.Only) == 0 || c.Embeddings.APIKeyEnv == "") {
 		return nil, fmt.Errorf("OpenRouter embeddings require zdr=true, allow_fallbacks=false, only providers and api_key_env")
+	}
+	if c.Embeddings.Provider != "local_pplx" && c.Embeddings.APIKeyEnv == "" {
+		return nil, fmt.Errorf("embeddings.api_key_env is required for remote embeddings")
 	}
 	for name, value := range map[string]string{"openai.base_url": c.OpenAI.BaseURL, "openai.api_key_env": c.OpenAI.APIKeyEnv, "openai.model": c.OpenAI.Model, "embeddings.base_url": c.Embeddings.BaseURL, "embeddings.model": c.Embeddings.Model} {
 		if value == "" {

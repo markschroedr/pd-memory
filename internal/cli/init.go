@@ -58,30 +58,81 @@ func initialize(path string) (int, error) {
 	if name == "" {
 		return 0, fmt.Errorf("name required")
 	}
-	keyPrompt := "OpenRouter API key (stored locally in a private credentials file): "
-	var key string
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprint(os.Stderr, keyPrompt)
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return 0, err
+	askKey := func(prompt string) (string, error) {
+		var key string
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprint(os.Stderr, prompt)
+			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				return "", err
+			}
+			key = string(b)
+		} else {
+			var err error
+			key, err = ask(prompt)
+			if err != nil {
+				return "", err
+			}
 		}
-		key = string(b)
-	} else {
-		key, e = ask(keyPrompt)
+		if key == "" || strings.ContainsAny(key, "\r\n\t\"' ") {
+			return "", fmt.Errorf("key required, without whitespace or quotes")
+		}
+		return key, nil
+	}
+	provider, e := ask("Provider: 1) OpenAI (recommended) 2) OpenRouter [1]: ")
+	if e != nil {
+		return 0, e
+	}
+	switch strings.ToLower(provider) {
+	case "", "1", "openai":
+		provider = "openai"
+	case "2", "openrouter":
+		provider = "openrouter"
+	default:
+		return 0, fmt.Errorf("choose OpenAI or OpenRouter")
+	}
+	keyEnv, providerName := "OPENAI_API_KEY", "OpenAI"
+	if provider == "openrouter" {
+		keyEnv, providerName = "OPENROUTER_API_KEY", "OpenRouter"
+		fmt.Fprintln(os.Stderr, "OpenRouter generation uses only the Azure ZDR route. Perplexity embeddings also require ZDR. Provider fallback is disabled.")
+	}
+	key, e := askKey(providerName + " API key (" + keyEnv + "): ")
+	if e != nil {
+		return 0, e
+	}
+	yes := func(s string) bool { return strings.EqualFold(s, "y") || strings.EqualFold(s, "yes") }
+	retention := "zero_data_retention"
+	if provider == "openai" {
+		zdr, e := ask("Does this OpenAI account have zero data retention? [y/N]: ")
 		if e != nil {
 			return 0, e
 		}
-	}
-	if key == "" || strings.ContainsAny(key, "\r\n\"' ") {
-		return 0, fmt.Errorf("key required, without whitespace or quotes")
+		if !yes(zdr) {
+			fmt.Fprintln(os.Stderr, "OpenAI may retain API data for abuse monitoring. store=false still applies.")
+			approval, e := ask("Continue with standard retention? [y/N]: ")
+			if e != nil {
+				return 0, e
+			}
+			if !yes(approval) {
+				fmt.Fprintln(os.Stderr, "Setup canceled; no files written.")
+				return 1, nil
+			}
+			retention = "standard_store_false"
+		}
 	}
 	piSetup, e := ask("Add Pi session import? [y/N]: ")
 	if e != nil {
 		return 0, e
 	}
-	raw := map[string]any{"settle_after": "3h", "auto_sync": true, "openai": map[string]any{"retention_verified": true}}
+	raw := map[string]any{"settle_after": "3h", "auto_sync": true,
+		"openai":     map[string]any{"provider": provider, "retention_policy": retention, "retention_verified": true},
+		"embeddings": map[string]any{"provider": provider}}
+	if provider == "openrouter" {
+		raw["openai"] = map[string]any{"provider": provider, "base_url": "https://openrouter.ai/api/v1", "api_key_env": keyEnv, "model": "openai/gpt-6-luna", "service_tier": "default", "zdr": true, "allow_fallbacks": false, "only": []string{"Azure"}, "retention_policy": retention, "retention_verified": true}
+		raw["embeddings"] = map[string]any{"provider": provider, "base_url": "https://openrouter.ai/api/v1", "api_key_env": keyEnv, "model": "perplexity/pplx-embed-v1-0.6b", "dimension": 1024, "zdr": true, "allow_fallbacks": false, "only": []string{"Perplexity"}}
+		raw["pricing"] = map[string]any{"input_per_million": 0.1, "cached_input_per_million": 0.01, "output_per_million": 0.5, "embedding_per_million": 0.004}
+	}
 	home, e := os.UserHomeDir()
 	if e != nil {
 		return 0, e
@@ -90,8 +141,7 @@ func initialize(path string) (int, error) {
 	credentials := filepath.Join(filepath.Dir(path), "credentials.env")
 	raw["credentials_file"] = credentials
 	raw["identity"] = map[string]any{"user_names": []string{name}, "third_party_names": []string{}}
-	// Requests require OpenRouter's ZDR-only routing; the live check verifies the route.
-	if strings.EqualFold(piSetup, "y") || strings.EqualFold(piSetup, "yes") {
+	if yes(piSetup) {
 		sessions := filepath.Join(home, ".pi", "agent", "sessions")
 		if root := os.Getenv("PI_CODING_AGENT_DIR"); root != "" {
 			sessions = filepath.Join(root, "sessions")
@@ -120,7 +170,7 @@ func initialize(path string) (int, error) {
 		}
 		return ce
 	}
-	if e = writeNew(credentials, []byte("OPENROUTER_API_KEY="+key+"\n")); e != nil {
+	if e = writeNew(credentials, []byte(keyEnv+"="+key+"\n")); e != nil {
 		return 0, e
 	}
 	if e = writeNew(path, b); e != nil {
@@ -140,7 +190,7 @@ func initialize(path string) (int, error) {
 		return 0, e
 	}
 	m.Close()
-	fmt.Fprintln(os.Stderr, "Config:", path, "\nWorkspace:", c.Workspace.Dir, "\nChecking generation and embeddings with ZDR-only provider routing...")
+	fmt.Fprintln(os.Stderr, "Config:", path, "\nWorkspace:", c.Workspace.Dir, "\nChecking generation and embeddings...")
 	code, e := run([]string{"doctor", "--live", "--config", path})
 	if e != nil || code != 0 {
 		return code, e
@@ -154,7 +204,7 @@ func initialize(path string) (int, error) {
 			if e != nil {
 				return 0, e
 			}
-			if strings.EqualFold(install, "y") || strings.EqualFold(install, "yes") {
+			if yes(install) {
 				cmd := exec.Command("pi", "install", "git:github.com/markschroedr/pd-memory@"+version)
 				cmd.Stdin = os.Stdin
 				cmd.Stdout = os.Stdout
