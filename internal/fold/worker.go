@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/markschroedr/pd-memory/internal/config"
@@ -39,25 +38,7 @@ type Outcome struct {
 	Busy        bool        `json:"busy,omitempty"`
 }
 
-func Lock(dir string, wait bool) (*os.File, error) {
-	if e := os.MkdirAll(dir, 0700); e != nil {
-		return nil, e
-	}
-	f, e := os.OpenFile(filepath.Join(dir, "worker.lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if e != nil {
-		return nil, e
-	}
-	flags := syscall.LOCK_EX
-	if !wait {
-		flags |= syscall.LOCK_NB
-	}
-	if e = syscall.Flock(int(f.Fd()), flags); e != nil {
-		f.Close()
-		return nil, e
-	}
-	return f, nil
-}
-func Unlock(f *os.File) { syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }
+func Lock(dir string, wait bool) (*os.File, error) { return LockFile(dir, "worker.lock", wait) }
 
 // Manual lock holders must hand off writes admitted while they held the lock.
 // Recorded failures remain failed until a retry; maintenance alone never wakes again.
@@ -80,7 +61,7 @@ func Release(c *config.Config, lock *os.File) error {
 }
 func Wake(c *config.Config) error {
 	lock, e := Lock(c.Workspace.Dir, false)
-	if errors.Is(e, syscall.EWOULDBLOCK) {
+	if errors.Is(e, ErrBusy) {
 		return nil
 	}
 	if e != nil {
@@ -92,7 +73,7 @@ func Wake(c *config.Config) error {
 		return e
 	}
 	cmd := exec.Command(binary, "worker", "--config", c.Path, "--json")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detach(cmd)
 	null, e := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if e != nil {
 		return e
@@ -355,7 +336,7 @@ func Run(c *config.Config, wait, retry bool) (Outcome, error) {
 	out := Outcome{Processed: []int64{}, Failed: []int64{}, Maintenance: view.Result{Built: []string{}, Failed: []view.Failure{}}}
 	for {
 		lock, e := Lock(c.Workspace.Dir, wait)
-		if errors.Is(e, syscall.EWOULDBLOCK) {
+		if errors.Is(e, ErrBusy) {
 			out.Busy = true
 			return out, nil
 		}
@@ -419,7 +400,7 @@ func Wait(c *config.Config, seqs []int64, retry bool) (Outcome, error) {
 	for {
 		time.Sleep(100 * time.Millisecond)
 		lock, err := Lock(c.Workspace.Dir, false)
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+		if errors.Is(err, ErrBusy) {
 			continue
 		}
 		if err != nil {
