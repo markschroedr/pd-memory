@@ -51,9 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/markschroedr/pd-memory/main/install
 pd-memory init
 ```
 
-The installer writes to `~/.local/bin`. Binaries for macOS, Linux and Windows (arm64 and x64) are also on [Releases](https://github.com/markschroedr/pd-memory/releases), or run `go install github.com/markschroedr/pd-memory@latest`.
+`init` asks for your name, a provider and one key, then checks the models live and optionally sets up Pi. The installer writes to `~/.local/bin`; binaries for macOS, Linux and Windows are on [Releases](https://github.com/markschroedr/pd-memory/releases).
 
-`init` asks for your name, a provider and one key, creates a workspace, checks the models live, and optionally adds Pi sessions as a source and installs the Pi extension.
+## Configuration
 
 - **OpenAI** (default): `OPENAI_API_KEY`, `gpt-6-luna` (Flex, `store=false`) and `text-embedding-3-small` at 1024 dimensions. Without zero data retention, init requires explicit approval of OpenAI's standard retention; declining writes nothing.
 - **OpenRouter**: `OPENROUTER_API_KEY`, `openai/gpt-6-luna` through the Azure ZDR route only, plus Perplexity embeddings. ZDR is required and fallback disabled.
@@ -71,7 +71,7 @@ pd-memory note --line "A durable observation." --page root --actor user --wait
 pd-memory help
 ```
 
-Add `--json` for machine output. `catalog` lists every command's schemas. `brief --folder PATH` adds one project's context; `focus` adjusts what it shows. Without `--wait`, writes return once logged. `rebuild` keeps the old memory next to the new one. Separate workspaces are the privacy boundary; there are no read filters.
+Add `--json` for machine output. `catalog` lists every command's schemas. `brief --folder PATH` adds one project's context; `focus` adjusts what it shows. Without `--wait`, writes return once logged. `rebuild` keeps the old memory next to the new one. Reads need no key: without embeddings, `recall` returns keyword matches and says so. Separate workspaces are the privacy boundary; there are no read filters.
 
 TypeScript hosts use `MemoryClient` from `integrations/client.ts`. After command changes, regenerate types with `pd-memory catalog --typescript > integrations/types.ts`.
 
@@ -116,6 +116,8 @@ The SQLite query must return unique `unit_id`, RFC3339 `time` (last activity) an
 Routes map folders to home pages by longest matching root. Unrouted folders use their last folder name; if it cannot form a page slug, sync reports the unit under `unrouted`, leaves its cursor alone, and continues. When a unit resumes, extraction sees digests of its earlier parts as read-only context.
 
 ## Pi
+
+pd-memory is built for coding agents. It ships one live integration, this Pi extension, as a reference for other hosts. Claude Code and Codex sessions can only be imported as sources; they get no tools or brief.
 
 The [Pi package](integrations/pi.ts) adds `memory_recall`, `memory_brief`, `memory_open`, `memory_note` and `memory_focus`; notes have agent authority. At session start it runs `pd-memory sync --auto` in the background (disable with `auto_sync = false`). Before each agent run it adds the current folder's brief as a `memory_brief` system context block. If the memory tools are deactivated, it injects nothing. The binary must be on Pi's `PATH`. Do not combine it with another host's memory injection.
 

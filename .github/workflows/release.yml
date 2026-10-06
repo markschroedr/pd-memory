@@ -6,14 +6,14 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         os: [darwin, linux, windows]
         arch: [arm64, amd64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Build
@@ -26,15 +26,15 @@ jobs:
           suffix=""
           if [ "$GOOS" = windows ]; then suffix=.exe; fi
           go build -trimpath -ldflags "-s -w -X github.com/markschroedr/pd-memory/internal/cli.Version=$VERSION" -o "pd-memory_${GOOS}_${GOARCH}${suffix}" .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pd-memory_${{ matrix.os }}_${{ matrix.arch }}
           path: pd-memory_*
   release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
           path: release
