@@ -50,17 +50,20 @@ This is an experimental personal project that I use daily with my own agents. Th
 
 Other rows are the paper's results from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/), each with its best reported embedding. pd-memory used `gpt-6-luna` to build memory and `gpt-5-mini` to answer and judge, and its context per question was about 1.3k to 2.1k tokens. One task failed during ingestion and counts as a miss. Each task builds its own small memory, so the brief never had to leave anything out; larger memories are the harder case and not measured here.
 
-## Setup
+## Quickstart
 
 ```sh
-go build -o pd-memory .
-cp config.example.toml /path/outside/git/pd-memory.toml
-export PD_MEMORY_CONFIG=/path/outside/git/pd-memory.toml
+curl -fsSL https://raw.githubusercontent.com/markschroedr/pd-memory/master/install.sh | sh
+pd-memory init
 ```
 
-Set the workspace directory, your name, providers and prices in the configuration. Credentials come from environment variables. Check your provider's retention controls before you enable `retention_verified`.
+The installer uses `~/.local/bin`; add it to `PATH` if your shell does not already include it. Alternatively, download a macOS, Linux, or Windows binary from [Releases](https://github.com/markschroedr/pd-memory/releases). Each platform has arm64 and x64 binaries. Go users can run `go install github.com/markschroedr/pd-memory@latest`.
 
-Generation uses either OpenAI directly with Flex, or OpenRouter with zero-retention routing. Embeddings use OpenRouter or a local Perplexity service, with no fallback between the two. Model calls cost money, and `stats` shows recorded usage and estimated cost.
+`init` asks for your name and one OpenRouter key, creates a workspace, and checks generation and embeddings live. It optionally adds Pi sessions as a source. Release binaries offer to install the matching Pi extension with `pi install`. Development builds use a local checkout instead.
+
+Configuration lives in `~/.config/pd-memory/pd-memory.toml`. Use `PD_MEMORY_CONFIG` or `--config FILE` to select a different config. Credentials live in a separate private file; environment variables override them. Keep runtime data and credentials outside Git.
+
+Defaults use OpenRouter with ZDR-only routing for generation and embeddings, with no provider fallback. You can instead configure OpenAI generation or a local Perplexity embedding service. Check your provider's retention controls before setting `retention_verified` for a custom provider. `doctor` checks the live models and exits non-zero when setup cannot run. Model calls cost money; `stats` shows recorded usage and estimated cost.
 
 ## Use
 
@@ -89,22 +92,65 @@ Regenerate the committed types after command changes:
 pd-memory catalog --typescript > integrations/types.ts
 ```
 
-## Coding sessions and Pi
+## Sources and sync
+
+A **source** is a configured location with one adapter. A **unit** is one session, file, or query row. A **cursor** records the imported part; only its adapter interprets it. The engine imports nothing from a unit until the whole unit has been inactive for `settle_after` (default: 3 hours).
 
 ```sh
-pd-memory import sessions --pi /path/to/pi/sessions --dry-run
-pd-memory import sessions --pi /path/to/pi/sessions --wait
+pd-memory sync --dry-run
+pd-memory sync                 # queue settled increments; do not wait for extraction
+pd-memory sync --source notes --wait
 ```
 
-The importer also accepts `--claude-code` and `--codex` paths. It reads completed exchanges, skips subagents, and remembers message ids so the next import only captures new messages.
+Sync is idempotent. Different units count as independent sources, even when their text is identical. Session adapters (`pi`, `claude-code`, `codex`) preserve imported message ids across branches and resumed sessions. Configure `after` before the first sync to avoid importing old history. Excludes are slash-separated globs relative to a source root; `**` matches any depth. Subagent and other unwanted folders are excluded through config, not hidden rules.
 
-The [Pi extension](integrations/pi.ts) adds memory tools. At the first prompt of a session it adds the standing brief and a recall for that prompt, sized by `recall_budget` in the engine config. Its settings live in `~/.config/pd-memory/pi.json`:
+One folder example:
 
-```json
-{"binary":"pd-memory","config":"/absolute/path/to/pd-memory.toml"}
+```toml
+settle_after = "3h"
+auto_sync = true
+
+[[sources]]
+name = "notes"
+adapter = "files"
+path = "~/notes"
+kind = "document"
+settle_after = "1h"
+exclude = ["**/drafts/**"]
 ```
 
-Capture defaults to daily imports, and `capture_mode: "live"` captures after every turn.
+The `files` adapter reads `.txt` and `.md`. One file is one unit; modification time is activity. A cursor stores the imported prefix's byte length and hash. Appends import only new text. A rewritten prefix is reported and not re-imported.
+
+One SQLite example:
+
+```toml
+[[sources]]
+name = "meetings"
+adapter = "sqlite"
+path = "~/meetings.sqlite"
+kind = "meeting"
+query = "SELECT id AS unit_id, updated_at AS time, transcript AS text, title FROM meetings"
+```
+
+The read-only query must return unique `unit_id`, RFC3339 `time`, and `text` columns. `speaker` and `title` are optional. One row is one unit; `time` must track its last activity. Appended row text imports as a new increment; rewritten prefixes are reported. Excludes match unit ids. No product-specific database schema is built into the engine.
+
+Routes use the longest matching folder root:
+
+```toml
+[[routes]]
+root = "~/projects/example"
+home = "example"
+```
+
+Unrouted folders use their last folder name as the home page. Speaker names come from `identity.user_names`. When an imported unit resumes, extraction receives earlier source digests as read-only context. Only its new part can supply claims and citations.
+
+## Pi
+
+The [Pi package](integrations/pi.ts) exposes `memory_recall`, `memory_brief`, `memory_open`, `memory_note`, and `memory_focus`. Notes always have agent authority. The binary must be on Pi's `PATH`; the extension needs no separate settings file.
+
+At session start the extension launches `pd-memory sync --auto` without waiting. Set `auto_sync = false` to disable this trigger; manual sync still works. Before each agent run it reads the current folder brief and adds the raw text as a named `memory_brief` system context block. It does not perform automatic recall or add hidden transcript messages. An unavailable engine warns and does not block the prompt.
+
+For local development: `pi install /path/to/pd-memory`. Do not load this extension alongside another host's memory injection or duplicate memory tools.
 
 ## License
 

@@ -1,0 +1,46 @@
+name: Release binaries
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [darwin, linux, windows]
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ github.ref_name }}
+        run: |
+          suffix=""
+          if [ "$GOOS" = windows ]; then suffix=.exe; fi
+          go build -trimpath -ldflags "-s -w -X github.com/markschroedr/pd-memory/internal/cli.Version=$VERSION" -o "pd-memory_${GOOS}_${GOARCH}${suffix}" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pd-memory_${{ matrix.os }}_${{ matrix.arch }}
+          path: pd-memory_*
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release
+      - name: Checksums
+        run: cd release && sha256sum pd-memory_* > checksums.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --generate-notes
