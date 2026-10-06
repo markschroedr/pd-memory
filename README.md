@@ -4,9 +4,7 @@ Memory for agents that starts with a map. The agent gets a short overview of eve
 
 <p align="center"><img src="assets/map.svg" alt="A compact brief of headings and one-line entries. One entry opens into its full observation with history and related pages, which links back to the sources it came from." width="760"></p>
 
-Most memory systems are built around search. That works when the agent knows what it is looking for, but in daily work it often doesn't even know there is something to search for. If I ask my agent what I should read this weekend, there is no good query. The answer depends on the shape of everything that is there, and that is what a search result doesn't show.
-
-There are two failure modes to avoid. By trying to be complete, you are tempted to increase the token budget and bloat the context, and on the other end there is the search-only case, where the agent doesn't know what it can search for. pd-memory tries to sit between them with a dictionary-style overview. Subjects are pages, and below each page are one-line observations:
+Search-only memory fails when the agent doesn't know there is something to search for. "What should I read this weekend?" has no good query; the answer depends on the shape of everything that is there. Dumping everything into context fails the other way. pd-memory sits between them with a dictionary-style overview. Subjects are pages, and below each page are one-line observations:
 
 ```text
 ## billing (project) — Usage-based billing for the platform. (14)
@@ -15,27 +13,23 @@ There are two failure modes to avoid. By trying to be complete, you are tempted 
 ### invoicing (artifact) — Invoice generation and delivery. (5)
 ```
 
-The id opens an entry, the number in brackets shows how prominent it is, a `+` means there is more detail behind it, and the end shows how many sources back it and when it happened. From there the agent can notice where it lacks detail, open the entry, follow links to related pages and check the sources behind a claim. Retrieval becomes part of the agent's thinking instead of a separate step.
+The id opens an entry, the bracket shows prominence, `+` means more detail, and the end shows source count and date. The agent can open entries, follow links to related pages, and check the sources behind a claim.
 
 ## How it works
 
-pd-memory reads conversations, meetings, coding sessions and documents, and a model turns them into observations. New material is compared with what is already there, so a repeated claim strengthens the existing observation and a later correction replaces the earlier one. Each observation keeps its sources, the evidence it came from, and its correction history.
+A model turns conversations, meetings, coding sessions and documents into observations. New material is compared with existing memory: a repeated claim strengthens an observation, a later correction replaces it. Each observation keeps its sources, evidence and correction history.
 
-A separate rating pass then judges how much each observation matters, calibrated against the rest of memory: how many kinds of requests it changes (reach), how likely an assistant would assume otherwise (surprise), whether it is a standing instruction (directive), how much care it needs (sensitivity), and how long it stays relevant (durability). The brief ranks by these ratings. Because rating is cheap and separate from extraction, a changed rating prompt re-rates the whole memory on the next run without a rebuild.
+A separate, cheap rating pass scores each observation for reach, surprise, directive, sensitivity and durability, calibrated against the rest of memory. The brief ranks by these ratings. A changed rating prompt re-rates everything on the next run without a rebuild.
 
 <p align="center"><img src="assets/log.svg" alt="New entries are appended to log.db. A single worker folds them into memory.db, a graph of pages and observations, which can be deleted and rebuilt from the log." width="760"></p>
 
-Everything that goes into memory is appended to a log first: sources, notes, corrections and forgets. A single worker reads the log in order and builds memory from it. The log is the only thing you need to back up, because memory can be deleted and rebuilt from it. A rebuild makes model calls again, so it costs money, but it loses nothing that was put in.
+Every input (sources, notes, corrections, forgets) is appended to a log first. A single worker folds the log in order into memory. Back up only the log: memory can be rebuilt from it, at the cost of new model calls. Closed periods are summarised once (days into weeks, weeks into months), and the overview is refreshed after enough has changed. There is no timer and no background service.
 
-Closed periods are summarised once (days into weeks, weeks into months), and the current overview is refreshed after enough has changed. All of this happens when new material comes in, so there is no timer and no background service.
-
-It is one Go executable and two SQLite files. Hosts call it as a CLI, and TypeScript hosts get a small typed client. Where it is still weak is when the big picture itself is the important information, because extracted observations tend to lose it.
-
-This is an experimental personal project that I use daily with my own agents. The earlier TypeScript engine remains at tag `v0.1-typescript`.
+It is one Go executable and two SQLite files, called as a CLI. It is weakest when the big picture itself is the important information. This is an experimental personal project that I use daily. The earlier TypeScript engine remains at tag `v0.1-typescript`.
 
 ## InMind benchmark
 
-[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests the case this design is built for. A user mentions a personal fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. I ran the benchmark on all 125 tasks with its answer model, judge, and prompts. The InMind team then re-judged the submitted answers; the pd-memory rows show their verified scores.
+[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests this case: a user mentions a fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. All 125 tasks ran with the benchmark's answer model, judge and prompts; the InMind team re-judged the pd-memory answers.
 
 | System | Direct recall | Target recall | Application |
 | --- | --- | --- | --- |
@@ -48,7 +42,7 @@ This is an experimental personal project that I use daily with my own agents. Th
 | Mem0 | 76.8% | 6.4% | 6.4% |
 | Fact already in context (control) | | 100.0% | 84.0% |
 
-Other rows are the paper's results from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/), each with its best reported embedding. pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings, and `gpt-5-mini` to answer and judge; its context per question was about 1.3k to 2.1k tokens. These numbers do not measure the new OpenAI embedding default. One task failed during ingestion and counts as a miss. Each task builds its own small memory, so the brief never had to leave anything out; larger memories are the harder case and not measured here.
+Other rows are from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/). pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings (not the OpenAI default below), and about 1.3k to 2.1k tokens of context per question. One task failed during ingestion and counts as a miss. Each task builds a small memory, so large memories are not measured here.
 
 ## Quickstart
 
@@ -57,17 +51,14 @@ curl -fsSL https://raw.githubusercontent.com/markschroedr/pd-memory/main/install
 pd-memory init
 ```
 
-The installer uses `~/.local/bin`; add it to `PATH` if your shell does not already include it. Alternatively, download a macOS, Linux, or Windows binary from [Releases](https://github.com/markschroedr/pd-memory/releases). Each platform has arm64 and x64 binaries. Go users can run `go install github.com/markschroedr/pd-memory@latest`.
+The installer writes to `~/.local/bin`. Binaries for macOS, Linux and Windows (arm64 and x64) are also on [Releases](https://github.com/markschroedr/pd-memory/releases), or run `go install github.com/markschroedr/pd-memory@latest`.
 
-`init` asks for your name and provider: OpenAI (recommended, default) or OpenRouter. Each choice needs exactly one key, hidden in a terminal. It creates a workspace and checks generation and embeddings live. It optionally adds Pi sessions as a source. Release binaries offer to install the matching Pi extension with `pi install`. Development builds use a local checkout instead.
+`init` asks for your name, a provider and one key, creates a workspace, checks the models live, and optionally adds Pi sessions as a source and installs the Pi extension.
 
-Configuration lives in `~/.config/pd-memory/pd-memory.toml`. Use `PD_MEMORY_CONFIG` or `--config FILE` to select a different config. Credentials live in a separate private file; environment variables override them. Keep runtime data and credentials outside Git.
+- **OpenAI** (default): `OPENAI_API_KEY`, `gpt-6-luna` (Flex, `store=false`) and `text-embedding-3-small` at 1024 dimensions. Without zero data retention, init requires explicit approval of OpenAI's standard retention; declining writes nothing.
+- **OpenRouter**: `OPENROUTER_API_KEY`, `openai/gpt-6-luna` through the Azure ZDR route only, plus Perplexity embeddings. ZDR is required and fallback disabled.
 
-OpenAI uses `OPENAI_API_KEY` for `gpt-6-luna` generation (Flex, `store=false`) and `text-embedding-3-small` embeddings with 1024 dimensions. Init asks whether the account has zero data retention. Otherwise it explains that OpenAI may retain API data for abuse monitoring and requires explicit approval for standard retention before writing files. Declining writes nothing. `store=false` alone is not proof of ZDR.
-
-OpenRouter uses `OPENROUTER_API_KEY` for `openai/gpt-6-luna` generation through the Azure ZDR route only, plus Perplexity embeddings. Both requests require ZDR and disable provider fallback. Init states this route restriction before requesting the key.
-
-Config can mix generation and embedding providers, including a local Perplexity embedding service. Set the complete provider fields and corresponding pricing; do not change an existing workspace's embedding model without rebuilding its vectors. Embedding providers never fall back to one another. `doctor` checks the live models and exits non-zero when setup cannot run. Model calls cost money; `stats` shows recorded usage and estimated cost.
+Config lives in `~/.config/pd-memory/pd-memory.toml` (override with `PD_MEMORY_CONFIG` or `--config`). Credentials live in a separate private file; environment variables override them. Providers can be mixed, including a local Perplexity embedding service; keep `[pricing]` aligned, and rebuild vectors if you change a workspace's embedding model. `doctor` checks setup; `stats` shows usage and estimated cost.
 
 ## Use
 
@@ -80,35 +71,21 @@ pd-memory note --line "A durable observation." --page root --actor user --wait
 pd-memory help
 ```
 
-Add `--json` for machine output. `catalog` lists every command's input and result schema with the engine version. `brief --folder PATH` adds context for one project, and `focus` adjusts what that project's brief shows. Recall embeds queries with the configured embedding model. Read commands do not change observations.
+Add `--json` for machine output. `catalog` lists every command's schemas. `brief --folder PATH` adds one project's context; `focus` adjusts what it shows. Without `--wait`, writes return once logged. `rebuild` keeps the old memory next to the new one. Separate workspaces are the privacy boundary; there are no read filters.
 
-Without `--wait`, ingestion returns once the entry is in the log and reports the queued work. `maintain` and `brief --compose` run maintenance by hand when a workspace has been quiet. `rebuild` keeps the old memory next to the new one.
-
-Separate workspaces are the privacy boundary. There are no read filters.
-
-## TypeScript hosts
-
-Use `MemoryClient` from `integrations/client.ts`. Its `call(command, input)` returns the command's typed result. It checks the binary version on first use and reports conflicts separately from other failures.
-
-Regenerate the committed types after command changes:
-
-```sh
-pd-memory catalog --typescript > integrations/types.ts
-```
+TypeScript hosts use `MemoryClient` from `integrations/client.ts`. After command changes, regenerate types with `pd-memory catalog --typescript > integrations/types.ts`.
 
 ## Sources and sync
 
-A **source** is a configured location with one adapter. A **unit** is one session, file, or query row. A **cursor** records the imported part; only its adapter interprets it. The engine imports nothing from a unit until the whole unit has been inactive for `settle_after` (default: 3 hours).
+A **source** is a configured location with an adapter (`pi`, `claude-code`, `codex`, `files`, `sqlite`). A **unit** is one session, file or row. A **cursor** records what was imported. Nothing is imported from a unit until it has been inactive for `settle_after` (default 3 hours).
 
 ```sh
 pd-memory sync --dry-run
-pd-memory sync                 # queue settled increments; do not wait for extraction
+pd-memory sync                 # queue settled increments without waiting
 pd-memory sync --source notes --wait
 ```
 
-Sync is idempotent. Different units count as independent sources, even when their text is identical. Session adapters (`pi`, `claude-code`, `codex`) preserve imported message ids across branches and resumed sessions. Configure `after` before the first sync to avoid importing old history. Excludes are slash-separated globs relative to a source root; `**` matches any depth. Subagent and other unwanted folders are excluded through config, not hidden rules.
-
-One folder example:
+Sync is idempotent. Session adapters keep imported message ids across branches and resumes. Set `after` before the first sync to skip old history. Excludes are globs relative to the source root; `**` matches any depth.
 
 ```toml
 settle_after = "3h"
@@ -116,52 +93,38 @@ auto_sync = true
 
 [[sources]]
 name = "notes"
-adapter = "files"
+adapter = "files"            # .txt and .md; appends import only the new text
 path = "~/notes"
 kind = "document"
 settle_after = "1h"
 exclude = ["**/drafts/**"]
-```
 
-The `files` adapter reads `.txt` and `.md`. One file is one unit; modification time is activity. A cursor stores the imported prefix's byte length and hash. Appends import only new text. A rewritten prefix is reported and not re-imported.
-
-One SQLite example:
-
-```toml
 [[sources]]
 name = "meetings"
 adapter = "sqlite"
 path = "~/meetings.sqlite"
 kind = "meeting"
 query = "SELECT id AS unit_id, updated_at AS time, transcript AS text, title FROM meetings"
-```
 
-The read-only query must return unique `unit_id`, RFC3339 `time`, and `text` columns. `speaker` and `title` are optional. One row is one unit; `time` must track its last activity. Appended row text imports as a new increment; rewritten prefixes are reported. Excludes match unit ids. No product-specific database schema is built into the engine.
-
-Routes use the longest matching folder root:
-
-```toml
 [[routes]]
 root = "~/projects/example"
 home = "example"
 ```
 
-Unrouted folders use their last folder name, normalized to a page slug, as the home page. If that name cannot form a page slug, sync reports the unit under `unrouted`, leaves its cursor unchanged, and continues. Add an explicit route for that folder. Speaker names come from `identity.user_names`. When an imported unit resumes, extraction receives earlier source digests as read-only context. Only its new part can supply claims and citations.
+The SQLite query must return unique `unit_id`, RFC3339 `time` (last activity) and `text`; `speaker` and `title` are optional. In both adapters, a rewritten prefix is reported, not re-imported.
+
+Routes map folders to home pages by longest matching root. Unrouted folders use their last folder name; if it cannot form a page slug, sync reports the unit under `unrouted`, leaves its cursor alone, and continues. When a unit resumes, extraction sees digests of its earlier parts as read-only context.
 
 ## Pi
 
-The [Pi package](integrations/pi.ts) exposes `memory_recall`, `memory_brief`, `memory_open`, `memory_note`, and `memory_focus`. Notes always have agent authority. The binary must be on Pi's `PATH`; the extension needs no separate settings file.
+The [Pi package](integrations/pi.ts) adds `memory_recall`, `memory_brief`, `memory_open`, `memory_note` and `memory_focus`; notes have agent authority. At session start it runs `pd-memory sync --auto` in the background (disable with `auto_sync = false`). Before each agent run it adds the current folder's brief as a `memory_brief` system context block. If the memory tools are deactivated, it injects nothing. The binary must be on Pi's `PATH`. Do not combine it with another host's memory injection.
 
-At session start the extension launches `pd-memory sync --auto` without waiting. Set `auto_sync = false` to disable this trigger; manual sync still works. Before each agent run it reads the current folder brief and adds the raw text as a named `memory_brief` system context block. It does not perform automatic recall or add hidden transcript messages. An unavailable engine warns and does not block the prompt.
-
-For local development: `pi install /path/to/pd-memory`. Do not load this extension alongside another host's memory injection or duplicate memory tools.
+For local development: `pi install /path/to/pd-memory`.
 
 ## License
 
 Copyright (c) 2026 Mark Schröder.
 
-pd-memory is licensed under the [GNU Affero General Public License v3.0](LICENSE). If you run a modified version as a network service, you must offer its source to its users.
-
-For use under other terms, for example in a closed-source product, a commercial license is available on request: mark@schroedermark.com.
+pd-memory is licensed under the [GNU Affero General Public License v3.0](LICENSE). If you run a modified version as a network service, you must offer its source to its users. A commercial license is available on request: mark@schroedermark.com.
 
 Commits before this license change remain available under the MIT License.
