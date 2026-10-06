@@ -35,12 +35,12 @@ This is an experimental personal project that I use daily with my own agents. Th
 
 ## InMind benchmark
 
-[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests the case this design is built for. A user mentions a personal fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. I ran the benchmark myself on all 125 tasks with its answer model, judge, and prompts.
+[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests the case this design is built for. A user mentions a personal fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. I ran the benchmark on all 125 tasks with its answer model, judge, and prompts. The InMind team then re-judged the submitted answers; the pd-memory rows show their verified scores.
 
 | System | Direct recall | Target recall | Application |
 | --- | --- | --- | --- |
-| pd-memory, brief and agent-driven search | 86.4% | 80.8% | **72.8%** |
-| pd-memory, brief and retrieval for the question | 93.6% | 83.2% | **69.6%** |
+| pd-memory, brief and retrieval for the question | 93.6% | 84.8% | **70.4%** |
+| pd-memory, brief and agent-driven search | 87.2% | 80.8% | **69.6%** |
 | Naive RAG (text-embedding-3-large) | 97.6% | 6.4% | 16.0% |
 | MemoryOS | 96.8% | 7.2% | 14.4% |
 | A-Mem | 100.0% | 12.0% | 9.6% |
