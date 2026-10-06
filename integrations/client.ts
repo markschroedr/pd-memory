@@ -34,7 +34,8 @@ export class MemoryClient {
       }
     });
     // The promise shares only the first-use version check, never command results.
-    await this.checked;
+    try { await this.checked; }
+    catch (error) { this.checked = undefined; throw error; }
     return this.execute(command, input, options);
   }
 

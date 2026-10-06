@@ -32,13 +32,9 @@ type IngestResult struct {
 	Status    string               `json:"status"`
 	Fold      *fold.Outcome        `json:"fold,omitempty"`
 }
-type ImportResult struct {
-	Import importer.Result `json:"import"`
-	Fold   *fold.Outcome   `json:"fold,omitempty"`
-}
-type CapturedResult struct {
-	Session  string   `json:"session"`
-	EntryIDs []string `json:"entry_ids"`
+type SyncResult struct {
+	Sync importer.Result `json:"sync"`
+	Fold *fold.Outcome   `json:"fold,omitempty"`
 }
 type NavigationItem struct {
 	ID       string  `json:"id"`
@@ -190,10 +186,8 @@ func resultSchema(name string) map[string]any {
 		output = new(MutationResult)
 	case "ingest":
 		output = new(IngestResult)
-	case "import":
-		output = new(ImportResult)
-	case "captured-session-entries":
-		output = new(CapturedResult)
+	case "sync":
+		output = new(SyncResult)
 	case "worker", "retry", "rebuild", "reindex":
 		output = new(fold.Outcome)
 	case "maintain":
@@ -223,9 +217,6 @@ func FullCatalog() EngineCatalog {
 		if d.Description != "" {
 			catalog.Commands = append(catalog.Commands, d)
 		} else {
-			if d.Name == "import" {
-				d.Name = "import sessions"
-			}
 			catalog.Operators = append(catalog.Operators, d)
 		}
 	}

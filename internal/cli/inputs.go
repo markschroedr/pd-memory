@@ -78,9 +78,6 @@ type DoctorInput struct {
 type RetryInput struct {
 	Seq *int64 `json:"seq,omitempty" cli:"pos"`
 }
-type CapturedInput struct {
-	Session string `json:"session"`
-}
 type EmptyInput struct{}
 type Definition struct {
 	Name         string         `json:"name"`
@@ -100,7 +97,7 @@ func definitions() []Definition {
 		{Name: "edit", Description: "Correct or supersede an observation, or merge or reparent a page. Preserves history. Returns queued unless wait is set.", New: func() any { return new(EditInput) }},
 		{Name: "forget", Description: "Remove an observation from current memory, preserving evidence. A timeline view is removed with its ancestors for rebuilding.", New: func() any { return new(ForgetInput) }},
 		{Name: "focus", Description: "Hide or show a page and its descendants, or an observation, in one folder's project brief only.", New: func() any { return new(FocusInput) }},
-		{Name: "ingest", New: func() any { return new(IngestInput) }}, {Name: "import", New: func() any { return new(importer.Options) }}, {Name: "worker", New: func() any { return new(EmptyInput) }}, {Name: "status", New: func() any { return new(EmptyInput) }}, {Name: "retry", New: func() any { return new(RetryInput) }}, {Name: "captured-session-entries", New: func() any { return new(CapturedInput) }}, {Name: "maintain", New: func() any { return new(EmptyInput) }}, {Name: "rebuild", New: func() any { return new(EmptyInput) }}, {Name: "reindex", New: func() any { return new(EmptyInput) }}, {Name: "doctor", New: func() any { return new(DoctorInput) }}, {Name: "stats", New: func() any { return new(EmptyInput) }},
+		{Name: "ingest", New: func() any { return new(IngestInput) }}, {Name: "sync", New: func() any { return new(importer.Options) }}, {Name: "worker", New: func() any { return new(EmptyInput) }}, {Name: "status", New: func() any { return new(EmptyInput) }}, {Name: "retry", New: func() any { return new(RetryInput) }}, {Name: "maintain", New: func() any { return new(EmptyInput) }}, {Name: "rebuild", New: func() any { return new(EmptyInput) }}, {Name: "reindex", New: func() any { return new(EmptyInput) }}, {Name: "doctor", New: func() any { return new(DoctorInput) }}, {Name: "stats", New: func() any { return new(EmptyInput) }},
 	}
 }
 func inputSchema(input any) map[string]any {

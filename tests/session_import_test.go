@@ -3,12 +3,15 @@ package integration
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
+	"time"
+
+	"github.com/markschroedr/pd-memory/internal/fold"
 
 	_ "modernc.org/sqlite"
 )
@@ -30,17 +33,9 @@ func TestSessionCaptureExactlyOnce(t *testing.T) {
 	if out, e := build.CombinedOutput(); e != nil {
 		t.Fatalf("build: %v %s", e, out)
 	}
-	template, err := os.ReadFile(filepath.Join(root, "config.example.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	workspace := filepath.Join(dir, "workspace")
 	config := filepath.Join(dir, "config.toml")
-	text := strings.ReplaceAll(string(template), "/absolute/path/to/runtime/workspace", workspace)
-	text = strings.ReplaceAll(text, "mode = \"global\"", "mode = \"off\"")
-	if err = os.WriteFile(config, []byte(text), 0600); err != nil {
-		t.Fatal(err)
-	}
+	base := fmt.Sprintf("settle_after = \"1ms\"\n[workspace]\ndir = %q\n[compose]\nmode = \"off\"\n", workspace)
 	at := "2026-01-01T00:00:00Z"
 	pi := func(id, parent, role, text string) map[string]any {
 		return map[string]any{"type": "message", "id": id, "parentId": parent, "timestamp": at, "message": map[string]any{"role": role, "content": []any{map[string]any{"type": "text", "text": text}, map[string]any{"type": "thinking", "thinking": "DO_NOT_IMPORT"}}, "stopReason": "stop"}}
@@ -61,7 +56,14 @@ func TestSessionCaptureExactlyOnce(t *testing.T) {
 		{"codex", []any{map[string]any{"type": "session_meta", "payload": map[string]any{"id": "shared", "cwd": "/example/project"}}, codex("u1", "user", "codex-FIRST"), map[string]any{"type": "event_msg", "timestamp": at, "payload": map[string]any{"type": "user_message", "message": "DO_NOT_IMPORT"}}, codex("a1", "assistant", "codex-REPLY1"), codex("u2", "user", "codex-SECOND")}, codex("a2", "assistant", "codex-REPLY2")},
 	}
 	run := func(provider, path string, flags ...string) map[string]any {
-		args := append([]string{"import", "sessions", "--config", config, "--" + provider, path, "--json"}, flags...)
+		if err := os.WriteFile(config, []byte(base+fmt.Sprintf("\n[[sources]]\nname = %q\nadapter = %q\npath = %q\nkind = \"coding_session\"\n", provider, provider, path)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		args := append([]string{"sync", "--config", config, "--source", provider, "--json"}, flags...)
 		cmd := exec.Command(binary, args...)
 		cmd.Env = append(os.Environ(), "OPENAI_API_KEY=", "OPENROUTER_API_KEY=")
 		out, e := cmd.Output()
@@ -69,25 +71,21 @@ func TestSessionCaptureExactlyOnce(t *testing.T) {
 			t.Fatalf("import: %v %s", e, out)
 		}
 		var r struct {
-			Import map[string]any `json:"import"`
+			Sync map[string]any `json:"sync"`
 		}
 		if e = json.Unmarshal(out, &r); e != nil {
 			t.Fatal(e)
 		}
-		return r.Import
+		return r.Sync
 	}
 	if err = os.MkdirAll(workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
-	lock, err := os.OpenFile(filepath.Join(workspace, "worker.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := fold.Lock(workspace, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer fold.Unlock(lock)
 	for _, fixture := range fixtures {
 		path := filepath.Join(dir, fixture.provider+".jsonl")
 		parts := []string{}
@@ -111,7 +109,7 @@ func TestSessionCaptureExactlyOnce(t *testing.T) {
 		if r := run(fixture.provider, path); r["submitted"] != float64(1) {
 			t.Fatalf("first capture: %v", r)
 		}
-		if r := run(fixture.provider, path, "--"+fixture.provider, path); r["messages"] != float64(0) {
+		if r := run(fixture.provider, path); r["messages"] != float64(0) {
 			t.Fatalf("duplicate capture: %v", r)
 		}
 		f, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)

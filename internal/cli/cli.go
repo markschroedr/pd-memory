@@ -36,14 +36,15 @@ Agent commands:
 
 Operator commands:
   ingest (--path FILE | --stdin | --dialogue-json | --manifest FILE) --kind KIND --label TEXT [--wait]
-  import sessions [--pi PATH] [--claude-code PATH] [--codex PATH] [--routes FILE] [--after ISO] [--dry-run | --wait]
-  worker, status, retry [SEQ], captured-session-entries --session KEY
+  sync [--source NAME] [--auto] [--dry-run | --wait]
+  init, version
+  worker, status, retry [SEQ]
   maintain, rebuild (paid), reindex, doctor [--live], stats, catalog
 
 Observation fields: --line, --body, --happened, --claimant, --kind,
 --confidence. Edit also accepts --authority and --clear-body.
 All command inputs also accept --input-json JSON. catalog exposes agent JSON schemas.
-Config: PD_MEMORY_CONFIG or ./pd-memory.toml. Writes return queued unless --wait.
+Config: PD_MEMORY_CONFIG or ~/.config/pd-memory/pd-memory.toml. Writes return queued unless --wait.
 Only ingestion wakes maintenance. Separate workspace directories are privacy boundaries.
 `
 
@@ -76,7 +77,11 @@ func flag(args *[]string, name string) (bool, error) {
 func configPath(args *[]string) (string, error) {
 	path := os.Getenv("PD_MEMORY_CONFIG")
 	if path == "" {
-		path = "./pd-memory.toml"
+		var e error
+		path, e = config.DefaultPath()
+		if e != nil {
+			return "", e
+		}
 	}
 	seen := false
 	for i := 0; i < len(*args); i++ {
@@ -138,11 +143,18 @@ func run(args []string) (code int, err error) {
 		}
 		return 0, print(catalog)
 	}
-	if command == "import" {
-		if len(args) == 0 || args[0] != "sessions" {
-			return 0, fmt.Errorf("usage: import sessions")
+	if command == "version" {
+		if len(args) > 0 {
+			return 0, fmt.Errorf("version accepts no arguments")
 		}
-		args = args[1:]
+		fmt.Println(binaryVersion())
+		return 0, nil
+	}
+	if command == "init" {
+		if len(args) > 0 {
+			return 0, fmt.Errorf("init accepts no arguments")
+		}
+		return initialize(path)
 	}
 	input, e := find(command)
 	if e != nil {
@@ -159,10 +171,23 @@ func run(args []string) (code int, err error) {
 	if e != nil {
 		return 0, e
 	}
+	needsCredentials := true
+	if command == "sync" {
+		in := input.(*importer.Options)
+		needsCredentials = !in.DryRun && !(in.Auto && !c.AutoSync)
+	}
+	if needsCredentials {
+		if e = c.LoadCredentials(); e != nil {
+			return 0, e
+		}
+	}
 	if command == "doctor" {
-		in := input.(*DoctorInput)
 		local := map[string]any{"workspace": c.Workspace.Dir, "provider": c.OpenAI.Provider, "base_url": c.OpenAI.BaseURL, "credential_env": c.OpenAI.APIKeyEnv, "credential_set": os.Getenv(c.OpenAI.APIKeyEnv) != "", "model": c.OpenAI.Model, "embedding_provider": c.Embeddings.Provider, "embedding_model": c.Embeddings.Model, "embedding_credential_set": c.Embeddings.Provider == "local_pplx" || os.Getenv(c.Embeddings.APIKeyEnv) != "", "service_tier": c.OpenAI.ServiceTier, "store": false, "retention_policy": c.OpenAI.RetentionPolicy, "retention_verified": c.OpenAI.RetentionVerified}
-		if in.Live {
+		if os.Getenv(c.OpenAI.APIKeyEnv) == "" || (c.Embeddings.Provider != "local_pplx" && os.Getenv(c.Embeddings.APIKeyEnv) == "") || !c.OpenAI.RetentionVerified {
+			print(local)
+			return 1, fmt.Errorf("setup cannot run: credentials and verified retention are required")
+		}
+		{ // doctor always probes live capabilities; --live remains accepted by existing callers.
 			lock, e := fold.Lock(c.Workspace.Dir, true)
 			if e != nil {
 				return 0, e
@@ -228,40 +253,25 @@ func run(args []string) (code int, err error) {
 			return 1, nil
 		}
 		return 0, nil
-	case "captured-session-entries":
-		in := input.(*CapturedInput)
-		if in.Session == "" {
-			return 0, fmt.Errorf("session required")
-		}
-		l, e := inputlog.Open(c.Workspace.Dir, false)
-		if e != nil {
-			if os.IsNotExist(e) {
-				return 0, print(map[string]any{"session": in.Session, "entry_ids": []string{}})
-			}
-			return 0, e
-		}
-		defer l.Close()
-		ids, e := l.Captured(in.Session)
-		if e != nil {
-			return 0, e
-		}
-		return 0, print(map[string]any{"session": in.Session, "entry_ids": ids})
-	case "import":
+	case "sync":
 		in := input.(*importer.Options)
+		if in.Auto && !c.AutoSync {
+			return 0, print(map[string]any{"sync": importer.Result{Disabled: true, Seqs: []int64{}, Rewritten: []string{}}})
+		}
 		var l *inputlog.Store
-		if !in.DryRun {
-			l, e = inputlog.Open(c.Workspace.Dir, true)
-			if e != nil {
-				return 0, e
-			}
+		l, e = inputlog.Open(c.Workspace.Dir, !in.DryRun)
+		if e != nil && !(in.DryRun && os.IsNotExist(e)) {
+			return 0, e
+		}
+		if l != nil {
 			defer l.Close()
 		}
 		out, e := importer.Run(c, l, *in)
 		if e != nil {
 			return 0, e
 		}
-		result := map[string]any{"import": out}
-		if !in.DryRun {
+		result := map[string]any{"sync": out}
+		if !in.DryRun && len(out.Seqs) > 0 {
 			if in.Wait {
 				processed, e := fold.Wait(c, out.Seqs, true)
 				result["fold"] = processed

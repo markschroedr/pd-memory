@@ -1,0 +1,11 @@
+{
+  "name": "pd-memory",
+  "version": "0.1.0",
+  "description": "Progressive-disclosure memory for agents",
+  "license": "AGPL-3.0-only",
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./integrations/pi.ts"] },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

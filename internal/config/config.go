@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"math"
 	"net/url"
@@ -14,8 +15,30 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+//go:embed defaults.toml
+var Defaults string
+
+type Route struct {
+	Root string `toml:"root"`
+	Home string `toml:"home"`
+}
+type Source struct {
+	Name        string   `toml:"name"`
+	Adapter     string   `toml:"adapter"`
+	Path        string   `toml:"path"`
+	Kind        string   `toml:"kind"`
+	SettleAfter string   `toml:"settle_after"`
+	After       string   `toml:"after"`
+	Exclude     []string `toml:"exclude"`
+	Query       string   `toml:"query"`
+}
 type Config struct {
-	Workspace struct {
+	CredentialsFile string   `toml:"credentials_file"`
+	SettleAfter     string   `toml:"settle_after"`
+	AutoSync        bool     `toml:"auto_sync"`
+	Routes          []Route  `toml:"routes"`
+	Sources         []Source `toml:"sources"`
+	Workspace       struct {
 		Dir string `toml:"dir"`
 	} `toml:"workspace"`
 	OpenAI struct {
@@ -125,41 +148,20 @@ func Load(path string) (*Config, error) {
 	if e != nil {
 		return nil, e
 	}
-	c.OpenAI.Provider = "openai"
-	c.Embeddings.Provider = "openrouter"
-	c.Ingest.MatchesPerCandidate = 5
-	c.Ingest.ExtractConcurrency = 4
-	c.Brief.GlobalBudget = 8000
-	c.Brief.ProjectBudget = 4000
-	c.Brief.RecallBudget = 1500
-	c.Brief.ProjectAffinityExponent = 4
-	c.Brief.DirectoryShare = .25
-	c.Brief.DirectoryMinObservations = 3
-	c.Brief.ComposeInputFactor = 4
-	c.Timeline.Timezone = "Local"
-	c.Timeline.HistoryBudget = 1000
-	c.Timeline.RecentBudget = 800
-	c.Timeline.OpenBudget = 400
-	c.Compose.Mode = "global"
-	c.Compose.MinChanges = 20
+	if e = toml.Unmarshal([]byte(Defaults), c); e != nil {
+		return nil, e
+	}
 	if e = toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(c); e != nil {
 		return nil, e
 	}
-	var raw map[string]map[string]any
-	if e = toml.Unmarshal(data, &raw); e != nil {
+	if c.OpenAI.Store || c.OpenAI.AllowFallbacks || c.Embeddings.AllowFallbacks {
+		return nil, fmt.Errorf("store and allow_fallbacks must be false")
+	}
+	if e = c.sources(); e != nil {
 		return nil, e
 	}
-	if raw["openai"]["store"] != false {
-		return nil, fmt.Errorf("openai.store must explicitly be false")
-	}
-	for _, table := range []string{"openai", "embeddings"} {
-		provider := c.OpenAI.Provider
-		if table == "embeddings" {
-			provider = c.Embeddings.Provider
-		}
-		if provider == "openrouter" && raw[table]["allow_fallbacks"] != false {
-			return nil, fmt.Errorf("%s.allow_fallbacks must explicitly be false", table)
-		}
+	if c.CredentialsFile != "" {
+		c.CredentialsFile = resolvePath(c.Path, c.CredentialsFile)
 	}
 	for _, names := range [][]string{c.Identity.UserNames, c.Identity.ThirdPartyNames, c.OpenAI.Only, c.Embeddings.Only} {
 		for _, name := range names {
@@ -182,9 +184,7 @@ func Load(path string) (*Config, error) {
 	if c.Workspace.Dir == "" {
 		return nil, fmt.Errorf("workspace.dir is required")
 	}
-	if !filepath.IsAbs(c.Workspace.Dir) {
-		c.Workspace.Dir = filepath.Join(filepath.Dir(c.Path), c.Workspace.Dir)
-	}
+	c.Workspace.Dir = resolvePath(c.Path, c.Workspace.Dir)
 	c.OpenAI.BaseURL = strings.TrimRight(c.OpenAI.BaseURL, "/")
 	c.Embeddings.BaseURL = strings.TrimRight(c.Embeddings.BaseURL, "/")
 	if !Contains([]string{"openai", "openrouter"}, c.OpenAI.Provider) || !Contains([]string{"local_pplx", "openrouter"}, c.Embeddings.Provider) {

@@ -1,0 +1,137 @@
+settle_after = "3h"
+auto_sync = true
+credentials_file = ""
+
+# Current runtime configuration. Copy outside Git and set PD_MEMORY_CONFIG to it.
+# Runtime databases and model outputs must also stay outside this repository.
+
+[workspace]
+dir = ""
+
+# Generation uses the OpenAI-compatible Responses API for either provider.
+[openai]
+provider = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model = "openai/gpt-6-luna"
+service_tier = "default"
+store = false
+timeout_ms = 900000
+
+# Set this only after an operator verifies the configured provider's retention
+# policy. `standard_store_false` requires explicit data-owner approval.
+# store=false is not proof of ZDR.
+retention_policy = "zero_data_retention"
+retention_verified = false
+
+# OpenRouter generation: change provider to "openrouter", base_url to
+# "https://openrouter.ai/api/v1", api_key_env to "OPENROUTER_API_KEY",
+# model to e.g. "openai/gpt-6-luna", and service_tier to "default".
+# These routing settings apply only to OpenRouter generation. Choose trusted
+# hosts for your selected model and update [pricing] for its actual rates.
+zdr = true
+allow_fallbacks = false
+only = ["Azure"]
+
+# For local Perplexity embeddings, set provider = "local_pplx", base_url to
+# the service's /embed endpoint, and model/dimension to its model. No remote fallback.
+[embeddings]
+provider = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model = "perplexity/pplx-embed-v1-0.6b"
+dimension = 1024
+timeout_ms = 120000
+zdr = true
+allow_fallbacks = false
+only = ["Perplexity"]
+
+[identity]
+# Claimant names with explicit workspace roles. Source kind does not set authority.
+user_names = []
+third_party_names = []
+
+[ingest]
+# Top related observations per candidate; shared content is sent once.
+# Similarity supplies context, not an identity or duplication decision.
+matches_per_candidate = 5
+# Sources extracted ahead in parallel. Integration stays serial and in log order.
+extract_concurrency = 4
+
+[chunk]
+target_tokens = 400
+single_chunk_tokens = 600
+extract_window_tokens = 150000
+
+[search]
+max_limit = 40
+rrf_k = 60
+
+[brief]
+# Standing brief without a folder. A folder brief adds the project part; a requested total
+# splits in this ratio.
+global_budget = 8000
+project_budget = 4000
+# Default for recall, including the situational recall a host adds at the first prompt.
+recall_budget = 1500
+spine_share = 0.3
+# Each further line from the same page counts this factor less, so one page cannot take the whole standing brief.
+page_decay = 0.95
+next_cap = 8
+# Higher values reserve more project-brief space for closer folder-to-page matches.
+project_affinity_exponent = 4
+# Maximum share of the global standing brief for a one-line directory of top-level subjects
+# that have no observations shown. Unused directory space returns to observations.
+directory_share = 0.25
+# Minimum observations below a top-level subject before the directory lists it.
+directory_min_observations = 3
+# Composition sees a wider deterministic brief, then rewrites it to the requested budget.
+compose_input_factor = 4
+
+[timeline]
+# Calendar boundary for day consolidation, as an IANA name such as "Europe/Berlin".
+# Defaults to the system timezone.
+# timezone = "Europe/Berlin"
+# Hard budgets, separate from the current-state budget.
+history_budget = 1000
+recent_budget = 800
+open_budget = 400
+
+[compose]
+# off: assembled only; global: automatic global composition; projects: configured folders too.
+mode = "global"
+min_changes = 20
+folders = []
+
+[buckets]
+bucket_3_min = 0.6
+bucket_2_min = 0.3
+
+[formulas]
+standing = "reach * (0.35 + 0.65 * surprise) * (1 + directive * reach) * (0.5 + 0.5 * confidence) * freshness * (0.6 + 0.4 * source_prior) * (1 + 0.15 * log(1 + sources))"
+situational = "relevance * (0.75 + 0.25 * reach) * (0.5 + 0.5 * confidence) * (0.7 + 0.3 * freshness) * source_prior"
+chunk = "relevance * (0.5 + 0.5 * reach) * source_prior"
+page = "best * (1 + 0.1 * log(1 + observations) + 0.05 * log(1 + inbound))"
+
+[call_sites]
+search = "situational"
+search_chunk = "chunk"
+brief_standing = "standing"
+brief_situational = "situational"
+page_rank = "page"
+
+[source_priors]
+note_user = 1.0
+note_agent = 0.8
+meeting = 0.7
+conversation = 0.6
+document = 0.5
+chat_log = 0.4
+coding_session = 0.3
+
+[pricing]
+# USD per million tokens. Keep these aligned with the configured model and tier.
+input_per_million = 0.1
+cached_input_per_million = 0.01
+output_per_million = 0.5
+embedding_per_million = 0.004

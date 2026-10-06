@@ -121,7 +121,13 @@ func (s *Store) Append(kind, actor string, payload any) (Submitted, error) {
 		if e = v.Validate(); e != nil {
 			return Submitted{}, e
 		}
-		h := sha256.Sum256([]byte(v.Kind + "\x00" + v.Text))
+		identity := v.Kind + "\x00" + v.Text
+		// Sync imports independent units, even when their new text is identical.
+		// The adapter cursor makes a repeated publication of the same increment idempotent.
+		if name, ok := v.Metadata["source_name"].(string); ok && v.Session != nil && v.Metadata["cursor"] != nil {
+			identity += "\x00" + name + "\x00" + *v.Session + "\x00" + memory.JSON(v.Metadata["cursor"])
+		}
+		h := sha256.Sum256([]byte(identity))
 		hash = hex.EncodeToString(h[:])
 	}
 	if !config.Contains([]string{"source", "note", "edit", "forget", "focus"}, kind) || !config.Contains([]string{"user", "agent", "system"}, actor) {
@@ -183,34 +189,6 @@ func (s *Store) Entries() ([]Entry, error) {
 		}
 		v.Payload = json.RawMessage(p)
 		out = append(out, v)
-	}
-	return out, rs.Err()
-}
-func (s *Store) Captured(session string) ([]string, error) {
-	rs, e := s.DB.Query("SELECT payload FROM entries WHERE kind='source' AND json_extract(payload,'$.session')=?", session)
-	if e != nil {
-		return nil, e
-	}
-	defer rs.Close()
-	set := map[string]bool{}
-	out := []string{}
-	for rs.Next() {
-		var p string
-		if e = rs.Scan(&p); e != nil {
-			return nil, e
-		}
-		var v Source
-		if e = json.Unmarshal([]byte(p), &v); e != nil {
-			return nil, e
-		}
-		if ids, ok := v.Metadata["entry_ids"].([]any); ok {
-			for _, id := range ids {
-				if s, ok := id.(string); ok && !set[s] {
-					set[s] = true
-					out = append(out, s)
-				}
-			}
-		}
 	}
 	return out, rs.Err()
 }
