@@ -73,7 +73,7 @@ function toolSchema(name: string, schema: Record<string, unknown>): Record<strin
     if (key === "since") value = { type: "integer", minimum: 0 };
     if (key === "confidence") value = { type: "number", minimum: 0, maximum: 1 };
     if (required[name]!.includes(key)) return [key, value];
-    // Daimon's optional tool fields accept null; null values are omitted before CLI dispatch.
+    // Optional tool fields accept null; null values are omitted before CLI dispatch.
     return [key, { anyOf: [value, { type: "null" }], default: null }];
   }));
   return { type: "object", properties, required: required[name], additionalProperties: false };
