@@ -53,7 +53,7 @@ Other rows are the paper's results from the [InMind leaderboard](https://keep-it
 ## Quickstart
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/markschroedr/pd-memory/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/markschroedr/pd-memory/main/install.sh | sh
 pd-memory init
 ```
 
