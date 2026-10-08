@@ -29,7 +29,7 @@ It is one Go executable and two SQLite files, called as a CLI. It is weakest whe
 
 ## InMind benchmark
 
-[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests this case: a user mentions a fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. All 125 tasks ran with the benchmark's answer model, judge and prompts; the InMind team re-judged the pd-memory answers.
+[InMind](https://github.com/imlrz/InMind) ([paper](https://arxiv.org/abs/2607.24368)) tests this case: a user mentions a fact once, such as an allergy, and 38 sessions later asks something that never names it, such as a macaron recipe. Application counts answers that use the fact. pd-memory is first on the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/), verified by the InMind team, who re-judged its answers. All 125 tasks ran with the benchmark's answer model, judge and prompts.
 
 | System | Direct recall | Target recall | Application |
 | --- | --- | --- | --- |
@@ -41,7 +41,7 @@ It is one Go executable and two SQLite files, called as a CLI. It is weakest whe
 | Mem0 | 76.8% | 6.4% | 6.4% |
 | Fact already in context (control) | | 100.0% | 84.0% |
 
-Other rows are from the [InMind leaderboard](https://keep-it-inmind.github.io/leaderboard/). pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings (not the OpenAI default below), and about 1.3k to 2.1k tokens of context per question: the brief plus a recall for the question. Letting the agent search on its own instead scored 69.6%. One task failed during ingestion and counts as a miss. Each task builds a small memory, so large memories are not measured here.
+Other rows are from the leaderboard. pd-memory used `gpt-6-luna` to build memory, Perplexity `pplx-embed-v1-0.6b` embeddings (not the OpenAI default below), and about 1.3k to 2.1k tokens of context per question: the brief plus a recall for the question. Letting the agent search on its own instead scored 69.6%. One task failed during ingestion and counts as a miss. Each task builds a small memory, so large memories are not measured here.
 
 ## Quickstart
 
